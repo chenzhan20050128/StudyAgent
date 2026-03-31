@@ -65,7 +65,7 @@ class QuizChatAgent:
     def handle_message(self, text: str, db: Session) -> str:
         cleaned = text.strip()
         if not cleaned:
-            return "你可以这样说：\n" "1) 帮我出一道 Python 单选题\n" "2) 我的答案是 A"
+            return "你可以这样说：\n" "帮我出一道 Python 语法的单选题\n"
 
         logger.info("quiz_chat.handle_message text=%s", cleaned)
         state: QuizChatState = {"text": cleaned}
@@ -270,6 +270,20 @@ class QuizChatAgent:
         except Exception:
             return raw_reply
 
+    def _polish_question_reply(self, raw_reply: str) -> str:
+        """用 LLM 将题目展示改写得更吸引人、更有学习激励性。"""
+        prompt = (
+            "你是学习助手，请把下面的题目展示改写得更吸引人、"
+            "鼓励用户认真思考和作答。风格要友好、积极、有趣，"
+            "必须保留所有信息（quiz_id、题型、题干、选项等），"
+            "用简短中文回应，不要添加或删除任何题目内容或选项。\n"
+            f"原始题目:\n{raw_reply}"
+        )
+        try:
+            return self._llm.chat(prompt)
+        except Exception:
+            return raw_reply
+
     def _llm_detect_intent(self, text: str) -> str:
         schema = {
             "name": "quiz_intent",
@@ -283,21 +297,154 @@ class QuizChatAgent:
             },
             "strict": False,
         }
-        prompt = (
-            "你是测验对话系统的意图判定器，只输出 JSON。\n"
-            "intent 仅允许：generate_quiz / submit_answer / list_weak_points / "
-            "list_history_quizzes / unknown。\n"
-            "判定规则（严格执行）：\n"
-            "1) 仅当用户明确表达‘要出题/再来一道/生成题目/来一道X题’时，"
-            "才判定为 generate_quiz；\n"
-            "2) 若 has_pending_quiz=true，则除非用户明确要求新出题或查询薄弱点/"
-            "历史题，否则一律判定为 submit_answer；\n"
-            "3) 在 has_pending_quiz=true 时，用户给出长文本、数字、代码、"
-            "选项字母，都视为 submit_answer；\n"
-            "4) 只有确实无法判断时才返回 unknown。\n"
-            f"has_pending_quiz={bool(self._pending_quiz_id)}\n"
-            f"用户输入：{text}"
-        )
+        # 准备few-shot示例
+        examples = [
+            # 出题意图示例
+            {
+                "user_input": "给我出一道python列表的单选题",
+                "has_pending_quiz": False,
+                "intent": "generate_quiz",
+            },
+            {
+                "user_input": "再来一道题",
+                "has_pending_quiz": True,
+                "intent": "generate_quiz",
+            },
+            {
+                "user_input": "我想做一道填空题",
+                "has_pending_quiz": False,
+                "intent": "generate_quiz",
+            },
+            {
+                "user_input": "出个题考考我",
+                "has_pending_quiz": False,
+                "intent": "generate_quiz",
+            },
+            {
+                "user_input": "生成一道关于机器学习的选择题",
+                "has_pending_quiz": False,
+                "intent": "generate_quiz",
+            },
+            {
+                "user_input": "重新出题吧",
+                "has_pending_quiz": True,
+                "intent": "generate_quiz",
+            },
+            # 提交答案意图示例
+            {"user_input": "A", "has_pending_quiz": True, "intent": "submit_answer"},
+            {
+                "user_input": "我的答案是B",
+                "has_pending_quiz": True,
+                "intent": "submit_answer",
+            },
+            {
+                "user_input": "A|C|D",
+                "has_pending_quiz": True,
+                "intent": "submit_answer",
+            },
+            {
+                "user_input": "我觉得答案是42",
+                "has_pending_quiz": True,
+                "intent": "submit_answer",
+            },
+            {
+                "user_input": "def add(a, b): return a + b",
+                "has_pending_quiz": True,
+                "intent": "submit_answer",
+            },
+            {
+                "user_input": "好的，我选C",
+                "has_pending_quiz": True,
+                "intent": "submit_answer",
+            },
+            # 在无进行中题目时提交答案的边界情况
+            {
+                "user_input": "A",
+                "has_pending_quiz": False,
+                "intent": "unknown",  # 应该让用户先出题
+            },
+            {
+                "user_input": "我的答案是B",
+                "has_pending_quiz": False,
+                "intent": "unknown",  # 应该让用户先出题
+            },
+            # 查询薄弱点示例
+            {
+                "user_input": "看看我的薄弱点",
+                "has_pending_quiz": False,
+                "intent": "list_weak_points",
+            },
+            {
+                "user_input": "我有哪些薄弱环节",
+                "has_pending_quiz": True,
+                "intent": "list_weak_points",
+            },
+            {
+                "user_input": "显示我的弱项",
+                "has_pending_quiz": True,
+                "intent": "list_weak_points",
+            },
+            # 查询历史题目示例
+            {
+                "user_input": "历史题目有哪些",
+                "has_pending_quiz": False,
+                "intent": "list_history_quizzes",
+            },
+            {
+                "user_input": "看看我之前做过的题",
+                "has_pending_quiz": True,
+                "intent": "list_history_quizzes",
+            },
+            {
+                "user_input": "显示历史记录",
+                "has_pending_quiz": False,
+                "intent": "list_history_quizzes",
+            },
+            # 模糊/不确定示例
+            {"user_input": "你好", "has_pending_quiz": False, "intent": "unknown"},
+            {
+                "user_input": "今天天气不错",
+                "has_pending_quiz": True,
+                "intent": "unknown",
+            },
+            {"user_input": "谢谢", "has_pending_quiz": True, "intent": "unknown"},
+        ]
+
+        # 构建few-shot提示词
+        examples_text = ""
+        for ex in examples:
+            examples_text += f"""用户输入: "{ex['user_input']}"
+当前有进行中题目: {ex['has_pending_quiz']}
+意图: {ex['intent']}
+
+"""
+
+        prompt = f"""你是测验对话系统的意图判定器，请根据用户输入和当前状态准确判断意图。
+
+当前有进行中题目: {bool(self._pending_quiz_id)}
+
+意图分类规则：
+1. generate_quiz: 用户要求生成新题目，如"出题"、"再来一道"、"做道题"等
+2. submit_answer: 在已有进行中题目时，用户提供答案（A、B、C、D、A|C|D、代码、文本等）
+3. list_weak_points: 用户查询薄弱点、弱项、需改进的地方
+4. list_history_quizzes: 用户查询历史题目记录
+5. unknown: 无法判断意图时使用
+
+关键判断逻辑：
+- 有进行中题目时，优先将用户输入视为提交答案（除非用户明确要求新题目、查薄弱点、查历史）
+- 无进行中题目时，需要先出题才能提交答案
+- 注意区分用户是在回答题目还是在提新要求
+
+参考示例：
+{examples_text}
+请根据以下实际情况判断意图：
+
+当前有进行中题目: {bool(self._pending_quiz_id)}
+用户输入: "{text}"
+
+只输出JSON格式的意图判断，如：{{"intent": "submit_answer"}}
+意图:"""
+
         try:
             raw = self._llm.chat_0_6B_with_json_schema(prompt, schema)
             data = json.loads(raw)
@@ -397,7 +544,7 @@ class QuizChatAgent:
             lines.append(
                 f"- quiz_id={row.id} 类型={row.question_type} 题干={stem[:80]}"
             )
-        lines.append("\n你可以继续提交答案或说：再出一道题。")
+        lines.append("\n你可以继续提交答案或说：再出一道python语法的简答题。")
         raw_reply = "\n".join(lines)
 
         # 调用 LLM 润色题目历史记录，使其更生动和鼓励用户复习
@@ -520,8 +667,7 @@ class QuizChatAgent:
         # 填空题与简答题：按整段文本提交答案
         return s
 
-    @staticmethod
-    def _format_question_reply(quiz_id: int, question: Dict[str, Any]) -> str:
+    def _format_question_reply(self, quiz_id: int, question: Dict[str, Any]) -> str:
         stem = str(question.get("stem") or "请作答。")
         q_type = str(question.get("type") or "single_choice")
         options = question.get("options") or []
@@ -540,4 +686,8 @@ class QuizChatAgent:
                 lines.append(f"  - {item}")
 
         lines.append("\n请直接回复你的答案。")
-        return "\n".join(lines)
+        raw_reply = "\n".join(lines)
+
+        # 调用 LLM 润色题目展示，使其更吸引人、更有学习激励性
+        polished_reply = self._polish_question_reply(raw_reply)
+        return polished_reply

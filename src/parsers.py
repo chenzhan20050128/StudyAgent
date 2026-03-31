@@ -1,8 +1,4 @@
-"""本项目内部使用的文档/网页解析工具。
-
-参考 testParse 目录下已实现的逻辑，但在 src 内给出精简实现，
-避免对 testParse 作为 Python 包的直接依赖。
-"""
+"""本项目内部使用的文档/网页解析工具。"""
 
 from __future__ import annotations
 
@@ -34,7 +30,7 @@ class DocumentParser:
     """PDF / Word 文档解析为纯文本。
 
     这里只复用解析思路，不在这里做分块，分块交给上层的
-    RecursiveCharacterTextSplitter 保持全局一致策略。
+    Splitter 保持全局一致策略。
     """
 
     def __init__(self, chunk_size: int = 800, overlap: int = 100) -> None:
@@ -42,29 +38,62 @@ class DocumentParser:
         self.overlap = overlap
 
     def parse_pdf(self, path: str) -> str:
+        """解析PDF文件为纯文本
+
+        逻辑流程:
+        1. 打开PDF文件并逐页遍历
+        2. 从每页提取文本块(blocks)
+        3. 过滤出纯文本块
+        4. 为每页添加分页标记便于识别
+        5. 将所有文本用换行符连接
+        """
         text_parts: List[str] = []
+        # 使用上下文管理器打开PDF文件
         with fitz.open(path) as doc:
+            # 遍历PDF的每一页，page_num是页码(0-indexed)
             for page_num, page in enumerate(doc):
+                # 获取当前页的所有文本块，返回列表格式
                 blocks = page.get_text("blocks")
+                # 从blocks中提取纯文本内容
+                # b[4]是文本内容，b[6]==0表示是文本块(非图像等)
                 page_text = [b[4] for b in blocks if b[6] == 0]
+                # 添加页码分隔符，便于后续处理时识别页边界
                 text_parts.append(f"--- 第{page_num + 1}页 ---")
+                # 将当前页的所有文本块添加到总列表
                 text_parts.extend(page_text)
+        # 用换行符连接所有文本部分
         return "\n".join(text_parts)
 
     def parse_word(self, path: str) -> str:
+        """解析Word文档为纯文本
+
+        逻辑流程:
+        1. 打开Word文件
+        2. 提取所有段落文本(非空)
+        3. 提取所有表格内容，按行组织
+        4. 将所有内容用换行符连接
+        """
+        # 使用python-docx库打开Word文档
         doc = Document(path)
         text_parts: List[str] = []
 
+        # 提取文档中的所有段落
         for para in doc.paragraphs:
+            # 只保留非空段落(去除纯空白行)
             if para.text.strip():
                 text_parts.append(para.text)
 
+        # 提取文档中的所有表格
         for table in doc.tables:
+            # 添加表格标记
             text_parts.append("\n[表格]")
+            # 逐行处理表格
             for row in table.rows:
+                # 将同一行的单元格内容用" | "分隔符连接
                 row_text = " | ".join(c.text.strip() for c in row.cells)
                 text_parts.append(row_text)
 
+        # 用换行符连接所有文本和表格内容
         return "\n".join(text_parts)
 
     def parse(self, path: str) -> str:

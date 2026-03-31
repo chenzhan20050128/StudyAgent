@@ -16,6 +16,7 @@ from src.rag_service import RAGService
 from src.plan_service import PlanService
 from src.quiz_service import QuizService
 from src.review_service import ReviewService
+from src.models import WeakPoint
 from src.vector_store import MilvusVectorStore
 from src.chat_agent import PlanChatAgent
 from src.quiz_chat_agent import QuizChatAgent
@@ -198,6 +199,44 @@ async def list_daily_tasks(
     return {"plan_id": plan_id, "tasks": tasks}
 
 
+@app.get("/api/daily-tasks/today")
+async def list_today_daily_tasks(db: Session = Depends(get_db)):
+    """查询当前用户今天的日常学习任务。
+
+    简化实现：
+    - 直接在 daily_tasks 表中过滤 user_id + task_date == today
+    - 返回结构与 /api/plans/{plan_id}/daily-tasks 中的单条任务结构保持一致
+    """
+    from datetime import date as _date_mod
+
+    from src.models import DailyTask as _DailyTaskMod
+
+    user_id = 1
+    today = _date_mod.today()
+    rows = (
+        db.query(_DailyTaskMod)
+        .filter(
+            _DailyTaskMod.user_id == user_id,
+            _DailyTaskMod.task_date == today,
+        )
+        .order_by(_DailyTaskMod.task_date)
+        .all()
+    )
+    tasks = [
+        {
+            "id": t.id,
+            "date": t.task_date.isoformat(),
+            "title": t.title,
+            "outline": t.outline_json,
+            "status": t.status,
+        }
+        for t in rows
+    ]
+    return {"tasks": tasks}
+
+
+# 向后兼容旧路径 `/complete`，推荐使用 `/status`
+@app.post("/api/daily-tasks/{task_id}/status")
 @app.post("/api/daily-tasks/{task_id}/complete")
 async def complete_daily_task(
     task_id: int,
@@ -206,7 +245,10 @@ async def complete_daily_task(
 ):
     """标记每日任务完成/跳过，并生成复习排期。"""
     user_id = 1
-    status = (body or {}).get("status", "done")
+    # 新语义统一使用 completed/skipped，仍兼容历史的 done
+    status = (body or {}).get("status", "completed")
+    if status == "done":
+        status = "completed"
     completed_date_raw = (body or {}).get("completed_date")
     completed_date = None
     if completed_date_raw:
@@ -301,7 +343,11 @@ async def main_chat(
 @app.get("/api/reviews/today")
 async def list_today_reviews(db: Session = Depends(get_db)):
     user_id = 1
-    items = _reviews.list_today_reviews(db, user_id=user_id, today=date.today())
+    items = _reviews.list_today_reviews(
+        db,
+        user_id=user_id,
+        today=date.today(),
+    )
     return {"items": items}
 
 
@@ -320,3 +366,54 @@ async def complete_review(
     except ValueError:
         return JSONResponse({"error": "review not found"}, status_code=404)
     return {"review_id": review_id, "status": status}
+
+
+@app.get("/api/weak-points")
+async def list_weak_points(
+    status: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """列出当前用户的薄弱点，可按状态过滤。"""
+    user_id = 1
+    query = db.query(WeakPoint).filter(WeakPoint.user_id == user_id)
+    if status:
+        query = query.filter(WeakPoint.status == status)
+    rows = query.order_by(WeakPoint.created_at.desc()).all()
+    items = [
+        {
+            "id": wp.id,
+            "description": wp.description,
+            "level": wp.level,
+            "status": wp.status,
+            "related_doc_id": wp.related_doc_id,
+            "related_chunk_ids": wp.related_chunk_ids,
+            "created_at": wp.created_at.isoformat(),
+        }
+        for wp in rows
+    ]
+    return {"items": items}
+
+
+@app.post("/api/weak-points/{weak_point_id}/status")
+async def update_weak_point_status(
+    weak_point_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    """更新薄弱点状态：pending / resolved / ignored。"""
+    user_id = 1
+    new_status = str(body.get("status") or "").strip() or "pending"
+    allowed = {"pending", "resolved", "ignored"}
+    if new_status not in allowed:
+        return JSONResponse({"error": "invalid status"}, status_code=400)
+
+    wp = db.get(WeakPoint, weak_point_id)
+    if not wp or wp.user_id != user_id:
+        return JSONResponse({"error": "weak_point not found"}, status_code=404)
+
+    wp.status = new_status
+    db.add(wp)
+    return {
+        "id": wp.id,
+        "status": wp.status,
+    }

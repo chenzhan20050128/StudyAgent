@@ -42,9 +42,9 @@
         }
 
         .sidebar-header {
-            padding: 24px 20px;
+            padding: 12px 10px;
             border-bottom: 1px solid #1f2a44;
-            font-size: 32px;
+            font-size: 16px;
             font-weight: 900;
             background: linear-gradient(135deg, #5c7cff, #7ee0ff);
             background-clip: text;
@@ -54,42 +54,42 @@
         }
 
         .sidebar-section {
-            padding: 20px;
+            padding: 10px;
             border-bottom: 1px solid #1f2a44;
         }
 
         .section-title {
-            font-size: 12px;
+            font-size: 6px;
             font-weight: 700;
             color: #8d97bd;
             text-transform: uppercase;
-            margin-bottom: 16px;
+            margin-bottom: 8px;
             letter-spacing: 1px;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 4px;
         }
 
         /* 上传区域精简 */
         #upload-form {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 12px;
         }
 
         input[type="text"],
         textarea {
             width: 100%;
-            padding: 8px 12px;
+            padding: 10px 12px;
             border: 1px solid #27334d;
-            border-radius: 8px;
+            border-radius: 6px;
             background: #0a0e27;
             color: #e6e8f2;
-            font-size: 13px;
+            font-size: 14px;
         }
 
         input[type="file"] {
-            font-size: 12px;
+            font-size: 14px;
             color: #8d97bd;
             cursor: pointer;
         }
@@ -98,12 +98,13 @@
             margin-top: 8px;
             padding: 12px;
             border: none;
-            border-radius: 10px;
+            border-radius: 8px;
             background: linear-gradient(135deg, #5c7cff, #7ee0ff);
             color: #0a0e27;
-            font-weight: 700;
+            font-weight: 600;
             cursor: pointer;
             transition: transform 0.2s;
+            font-size: 14px;
         }
 
         #upload-btn:hover {
@@ -117,25 +118,30 @@
         }
 
         #upload-status {
-            font-size: 12px;
+            font-size: 13px;
             margin-top: 8px;
             color: #7ee0ff;
             display: none;
+        }
+
+        #upload-trigger-btn:hover {
+            transform: translateY(-1px);
+            opacity: 0.9;
         }
 
         /* 复习任务列表 */
         .review-container {
             flex: 1;
             overflow-y: auto;
-            padding: 20px;
+            padding: 10px;
         }
 
         .review-item {
             background: #11172b;
             border: 1px solid #1f2a44;
-            border-radius: 10px;
-            padding: 12px;
-            margin-bottom: 12px;
+            border-radius: 5px;
+            padding: 6px;
+            margin-bottom: 6px;
             transition: all 0.2s;
         }
 
@@ -148,45 +154,46 @@
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 8px;
+            margin-bottom: 2px;
         }
 
         .review-tag {
-            font-size: 10px;
-            padding: 2px 8px;
-            border-radius: 4px;
+            font-size: 2px;
+            padding: 1px 2px;
+            border-radius: 1px;
             background: #1f2a44;
             color: #7ee0ff;
             font-weight: 700;
         }
 
         .review-meta {
-            font-size: 10px;
+            font-size: 2px;
             color: #565f89;
             text-align: right;
         }
 
         .review-text {
-            font-size: 11px;
+            font-size: 3px;
             color: #c0c8e5;
-            line-height: 1.2;
+            line-height: 1.0;
             font-weight: 500;
+            margin-top: 2px;
         }
 
         .review-detail {
-            font-size: 10px;
+            font-size: 2px;
             color: #8d97bd;
-            margin-top: 4px;
-            padding-top: 4px;
+            margin-top: 1px;
+            padding-top: 1px;
             border-top: 1px dashed #1f2a44;
-            line-height: 1.2;
+            line-height: 1.0;
         }
 
         .review-empty {
             text-align: center;
             color: #565f89;
-            padding: 40px 0;
-            font-size: 13px;
+            padding: 20px 0;
+            font-size: 6px;
         }
 
         /* 主对话区域 - 占据 80% 视野感 */
@@ -352,6 +359,61 @@
             background: #1f2a44;
             border-radius: 10px;
         }
+
+        /* 模态对话框样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background-color: #0f1426;
+            margin: 10% auto;
+            padding: 0;
+            border: 1px solid #1f2a44;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid #1f2a44;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #e6e8f2;
+            font-size: 18px;
+        }
+
+        .modal-header button {
+            background: none;
+            border: none;
+            color: #8d97bd;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
     </style>
 </head>
 
@@ -364,12 +426,14 @@
             <!-- 上传区 -->
             <div class="sidebar-section">
                 <div class="section-title"><span>📁</span> 上传资料</div>
-                <div id="upload-form">
-                    <input id="file" type="file" />
-                    <textarea id="url" placeholder="粘贴 URL 或 文本..." rows="2"></textarea>
-                    <input id="title" type="text" placeholder="标题 (可选)" />
-                    <button id="upload-btn">开始解析</button>
-                    <div id="upload-status" class="result"></div>
+                <button id="upload-trigger-btn">上传资料</button>
+            </div>
+
+            <!-- 今日学习任务（日常任务） -->
+            <div class="review-container">
+                <div class="section-title"><span>📅</span> 今日学习任务</div>
+                <div id="daily-task-list">
+                    <div class="review-empty">正在拉取今日学习任务...</div>
                 </div>
             </div>
 
@@ -378,7 +442,15 @@
                 <div class="section-title"><span>🔔</span> 每日复习提醒</div>
                 <div id="review-list">
                     <!-- 动态加载 -->
-                    <div class="review-empty">正在拉取今日任务...</div>
+                    <div class="review-empty">正在拉取今日复习任务...</div>
+                </div>
+            </div>
+
+            <!-- 薄弱点清单 -->
+            <div class="review-container">
+                <div class="section-title"><span>📉</span> 知识薄弱点</div>
+                <div id="weak-point-list">
+                    <div class="review-empty">正在拉取薄弱点...</div>
                 </div>
             </div>
         </div>
@@ -400,7 +472,7 @@
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                         </svg>
                     </button>
-                    <div style="font-size: 12px; color: #565f89;">基于全量知识库 RAG</div>
+                    <div style="font-size: 12px; color: #565f89;">基于知识库 RAG</div>
                 </div>
             </div>
             <div id="chat-box">
@@ -422,6 +494,25 @@
                 </div>
             </div>
         </div>
+
+        <!-- 上传对话框 -->
+        <div id="upload-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>上传资料</h3>
+                    <button id="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="upload-form">
+                        <input id="file" type="file" />
+                        <textarea id="url" placeholder="粘贴 URL 或 文本..." rows="2"></textarea>
+                        <input id="title" type="text" placeholder="标题 (可选)" />
+                        <button id="upload-btn">开始解析</button>
+                        <div id="upload-status" class="result"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -431,6 +522,28 @@
         const chatBtn = qs('chat-btn');
         const uploadBtn = qs('upload-btn');
         const reviewList = qs('review-list');
+
+        // 模态对话框相关
+        const uploadTriggerBtn = qs('upload-trigger-btn');
+        const uploadModal = qs('upload-modal');
+        const modalClose = qs('modal-close');
+
+        // 显示模态对话框
+        uploadTriggerBtn.addEventListener('click', () => {
+            uploadModal.style.display = 'block';
+        });
+
+        // 关闭模态对话框
+        modalClose.addEventListener('click', () => {
+            uploadModal.style.display = 'none';
+        });
+
+        // 点击模态背景关闭
+        uploadModal.addEventListener('click', (e) => {
+            if (e.target === uploadModal) {
+                uploadModal.style.display = 'none';
+            }
+        });
 
         // 自动高度文本域
         chatInput.addEventListener('input', function () {
@@ -606,3 +719,249 @@
 </body>
 
 </html>
+
+<script>
+    // === 工具函数 ===
+    function formatDate(dateStr) {
+        if (!dateStr) return "";
+        try {
+            const d = new Date(dateStr);
+            return d.toISOString().slice(0, 10);
+        } catch {
+            return dateStr;
+        }
+    }
+
+    async function apiGet(url) {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+            throw new Error(`GET ${url} failed: ${resp.status}`);
+        }
+        return resp.json();
+    }
+
+    async function apiPost(url, body) {
+        const resp = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: body ? JSON.stringify(body) : null,
+        });
+        if (!resp.ok) {
+            const msg = await resp.text();
+            throw new Error(`POST ${url} failed: ${resp.status} ${msg}`);
+        }
+        return resp.json().catch(() => ({}));
+    }
+
+    // === 日常任务相关 ===
+    async function loadTodayDailyTasks() {
+        const container = document.getElementById("daily-task-list");
+        container.innerHTML = '<div class="review-empty">正在拉取今日学习任务...</div>';
+        try {
+            const data = await apiGet("/api/daily-tasks/today");
+            const tasks = data.tasks || [];
+            if (!tasks.length) {
+                container.innerHTML = '<div class="review-empty">今日暂无学习任务</div>';
+                return;
+            }
+            container.innerHTML = "";
+            for (const t of tasks) {
+                const div = document.createElement("div");
+                div.className = "review-item";
+                const statusLabel = t.status || "pending";
+                div.innerHTML = `
+                    <div class="review-header">
+                        <div>
+                            <div class="review-tag">日常任务</div>
+                            <div class="review-text" style="margin-top:2px;">${t.title}</div>
+                        </div>
+                        <div class="review-meta">
+                            <div>日期：${formatDate(t.date)}</div>
+                            <div>状态：${statusLabel}</div>
+                        </div>
+                    </div>
+                    <div class="review-detail">
+                        ${t.outline && t.outline.length ? t.outline.map(p => `• ${p}`).join('<br/>') : "基于学习计划生成的日常任务"}
+                    </div>
+                    <div style="margin-top:4px; display:flex; gap:4px; justify-content:flex-end;">
+                        <button class="mini-btn" data-action="complete">完成任务</button>
+                        <button class="mini-btn" data-action="skip">跳过任务</button>
+                    </div>
+                `;
+
+                const completeBtn = div.querySelector('button[data-action="complete"]');
+                const skipBtn = div.querySelector('button[data-action="skip"]');
+                completeBtn.onclick = () => completeDailyTask(t.id, "completed");
+                skipBtn.onclick = () => completeDailyTask(t.id, "skipped");
+
+                container.appendChild(div);
+            }
+        } catch (e) {
+            console.error(e);
+            container.innerHTML = '<div class="review-empty">获取今日学习任务失败</div>';
+        }
+    }
+
+    async function completeDailyTask(taskId, status) {
+        try {
+            await apiPost(`/api/daily-tasks/${taskId}/status`, { status });
+            await loadTodayDailyTasks();
+            await loadTodayReviews();
+        } catch (e) {
+            console.error(e);
+            alert("更新日常任务状态失败: " + e.message);
+        }
+    }
+
+    // === 复习任务相关 ===
+    async function loadTodayReviews() {
+        const container = document.getElementById("review-list");
+        container.innerHTML = '<div class="review-empty">正在拉取今日复习任务...</div>';
+        try {
+            const data = await apiGet("/api/reviews/today");
+            const items = data.items || [];
+            if (!items.length) {
+                container.innerHTML = '<div class="review-empty">今日暂无需要复习的任务</div>';
+                return;
+            }
+            container.innerHTML = "";
+            for (const item of items) {
+                const div = document.createElement("div");
+                div.className = "review-item";
+
+                const target = item.target || {};
+                const isDaily = item.target_type === "daily_task";
+                const isWeak = item.target_type === "weak_point";
+
+                const title = isDaily
+                    ? (target.title || "日常任务")
+                    : (target.description || "薄弱点复习");
+
+                div.innerHTML = `
+                    <div class="review-header">
+                        <div>
+                            <div class="review-tag">${isDaily ? "日常任务复习" : "薄弱点复习"} · 第${item.stage}轮</div>
+                            <div class="review-text" style="margin-top:4px;">${title}</div>
+                        </div>
+                        <div class="review-meta">
+                            <div>计划日期：${formatDate(item.scheduled_date)}</div>
+                            <div>状态：${item.status}</div>
+                        </div>
+                    </div>
+                    <div class="review-detail">
+                        ${isDaily ? `学习日期：${formatDate(target.date)}` : ""}
+                    </div>
+                    <div style="margin-top:4px; display:flex; gap:4px; justify-content:flex-end;">
+                        <button class="mini-btn" data-action="complete">完成复习</button>
+                        <button class="mini-btn" data-action="skip">跳过本次</button>
+                    </div>
+                `;
+
+                const completeBtn = div.querySelector('button[data-action="complete"]');
+                const skipBtn = div.querySelector('button[data-action="skip"]');
+                completeBtn.onclick = () => completeReview(item.review_id, "completed");
+                skipBtn.onclick = () => completeReview(item.review_id, "skipped");
+
+                container.appendChild(div);
+            }
+        } catch (e) {
+            console.error(e);
+            container.innerHTML = '<div class="review-empty">获取复习任务失败</div>';
+        }
+    }
+
+    async function completeReview(reviewId, status) {
+        try {
+            await apiPost(`/api/reviews/${reviewId}/complete`, { status });
+            await loadTodayReviews();
+        } catch (e) {
+            console.error(e);
+            alert("更新复习任务状态失败: " + e.message);
+        }
+    }
+
+    // === 薄弱点相关 ===
+    async function loadWeakPoints() {
+        const container = document.getElementById("weak-point-list");
+        container.innerHTML = '<div class="review-empty">正在拉取薄弱点...</div>';
+        try {
+            const data = await apiGet("/api/weak-points?status=pending");
+            const items = data.items || [];
+            if (!items.length) {
+                container.innerHTML = '<div class="review-empty">暂无待解决的薄弱点</div>';
+                return;
+            }
+            container.innerHTML = "";
+            for (const wp of items) {
+                const div = document.createElement("div");
+                div.className = "review-item";
+                div.innerHTML = `
+                    <div class="review-header">
+                        <div>
+                            <div class="review-tag">薄弱点 · ${wp.level || "medium"}</div>
+                            <div class="review-text" style="margin-top:4px;">${wp.description}</div>
+                        </div>
+                        <div class="review-meta">
+                            <div>状态：${wp.status}</div>
+                            <div>创建：${formatDate(wp.created_at)}</div>
+                        </div>
+                    </div>
+                    <div class="review-detail">
+                        状态：${wp.status} · 创建：${formatDate(wp.created_at)}
+                    </div>
+                    <div style="margin-top:4px; display:flex; gap:4px; justify-content:flex-end;">
+                        <button class="mini-btn" data-action="resolved">标记已解决</button>
+                        <button class="mini-btn" data-action="ignored">忽略</button>
+                    </div>
+                `;
+
+                const resolvedBtn = div.querySelector('button[data-action="resolved"]');
+                const ignoredBtn = div.querySelector('button[data-action="ignored"]');
+                resolvedBtn.onclick = () => updateWeakPointStatus(wp.id, "resolved");
+                ignoredBtn.onclick = () => updateWeakPointStatus(wp.id, "ignored");
+
+                container.appendChild(div);
+            }
+        } catch (e) {
+            console.error(e);
+            container.innerHTML = '<div class="review-empty">获取薄弱点失败</div>';
+        }
+    }
+
+    async function updateWeakPointStatus(id, status) {
+        try {
+            await apiPost(`/api/weak-points/${id}/status`, { status });
+            await loadWeakPoints();
+        } catch (e) {
+            console.error(e);
+            alert("更新薄弱点状态失败: " + e.message);
+        }
+    }
+
+    // 简单按钮样式，复用现有色系
+    const style = document.createElement("style");
+    style.textContent = `
+        .mini-btn {
+            padding: 1px 3px;
+            border-radius: 2px;
+            border: none;
+            font-size: 4px;
+            cursor: pointer;
+            background: #1f2a44;
+            color: #e6e8f2;
+            transition: background 0.2s, transform 0.1s;
+        }
+        .mini-btn:hover {
+            background: #5c7cff;
+            transform: translateY(-1px);
+        }
+    `;
+    document.head.appendChild(style);
+
+    // 初始化加载
+    window.addEventListener("load", () => {
+        loadTodayDailyTasks();
+        loadTodayReviews();
+        loadWeakPoints();
+    });
+</script>
