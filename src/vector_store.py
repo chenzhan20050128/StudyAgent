@@ -98,19 +98,23 @@ class MilvusVectorStore:
 
         filter_expr = f'user_id == "{user_id}"'
         if doc_ids:
-            filter_expr += f" and doc_id in {tuple(doc_ids)}"
+            safe_doc_ids = sorted({int(d) for d in doc_ids})
+            doc_ids_expr = "[" + ", ".join(str(d) for d in safe_doc_ids) + "]"
+            filter_expr += f" and doc_id in {doc_ids_expr}"
 
         dense_req = AnnSearchRequest(
             data=[query_vector],
             anns_field="embedding",
             param={"metric_type": "COSINE", "params": {"ef": 64}},
             limit=limit,
+            expr=filter_expr,
         )
         sparse_req = AnnSearchRequest(
             data=[query_text],
             anns_field="sparse_bm25",
             param={"metric_type": "BM25"},
             limit=limit,
+            expr=filter_expr,
         )
         ranker = WeightedRanker(0.8, 0.2)
         result = self.client.hybrid_search(
@@ -118,7 +122,6 @@ class MilvusVectorStore:
             reqs=[dense_req, sparse_req],
             ranker=ranker,
             limit=limit,
-            filter=filter_expr,
             output_fields=[
                 "chunk_id",
                 "doc_id",

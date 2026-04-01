@@ -16,7 +16,8 @@ from src.rag_service import RAGService
 from src.plan_service import PlanService
 from src.quiz_service import QuizService
 from src.review_service import ReviewService
-from src.models import WeakPoint
+from src.stats_service import StatsService
+from src.models import Document, WeakPoint
 from src.vector_store import MilvusVectorStore
 from src.chat_agent import PlanChatAgent
 from src.quiz_chat_agent import QuizChatAgent
@@ -117,10 +118,119 @@ async def upload_document(
             text = url or ""
 
     parsed = _docs.parse_and_chunk(doc, text)
+    _docs.auto_tag_document(db, _llm, parsed, manual_tags=tag_list or [])
     _docs.index_to_milvus(_vec, _llm, parsed)
     doc.status = "parsed"
     db.add(doc)
     return {"doc_id": doc.id, "status": doc.status}
+
+
+@app.get("/api/documents")
+async def list_documents(db: Session = Depends(get_db)):
+    """查询当前用户名下的文档列表。"""
+
+    user_id = 1
+    rows = (
+        db.query(Document)
+        .filter(Document.user_id == user_id)
+        .order_by(Document.id.desc())
+        .all()
+    )
+    items = [
+        {
+            "doc_id": d.id,
+            "title": d.title,
+            "source_type": d.source_type,
+            "status": d.status,
+        }
+        for d in rows
+    ]
+    return {"items": items}
+
+
+@app.post("/api/documents/share")
+async def share_documents(
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    """将当前用户的若干文档复制一份给目标用户。"""
+
+    user_id = 1
+    target_raw = body.get("target_user_id")
+    if target_raw is None:
+        return JSONResponse({"error": "target_user_id required"}, status_code=400)
+    try:
+        target_user_id = int(target_raw)
+    except Exception:
+        return JSONResponse({"error": "target_user_id invalid"}, status_code=400)
+
+    doc_ids_raw = body.get("doc_ids") or []
+    doc_ids: list[int] = []
+    for d in doc_ids_raw:
+        try:
+            doc_ids.append(int(d))
+        except Exception:
+            continue
+
+    if not doc_ids:
+        return JSONResponse({"error": "doc_ids required"}, status_code=400)
+
+    owned_rows = (
+        db.query(Document.id)
+        .filter(Document.user_id == user_id, Document.id.in_(doc_ids))
+        .all()
+    )
+    owned_ids = {int(r[0]) for r in owned_rows}
+    missing = [d for d in doc_ids if d not in owned_ids]
+    if missing:
+        return JSONResponse(
+            {"error": "doc not found or not owned", "missing": missing},
+            status_code=404,
+        )
+
+    shared: list[dict] = []
+    failed: list[dict] = []
+    for doc_id in doc_ids:
+        src_doc = db.get(Document, doc_id)
+        if src_doc is None:
+            failed.append(
+                {
+                    "from_doc_id": doc_id,
+                    "status": "failed",
+                    "reason": "source_missing",
+                }
+            )
+            continue
+        result = _docs.fork_document_to_user(db, _vec, _llm, src_doc, target_user_id)
+        if result.get("status") == "parsed":
+            shared.append(
+                {
+                    "from_doc_id": result.get("from_doc_id"),
+                    "to_doc_id": result.get("to_doc_id"),
+                }
+            )
+        else:
+            failed.append(result)
+
+    return {"shared": shared, "failed": failed or None}
+
+
+@app.get("/api/tags")
+async def list_all_tags(db: Session = Depends(get_db)):
+    """获取当前用户所有已有的文档标签列表。"""
+    from src.models import Document, DocumentTag
+
+    user_id = 1
+    # 通过 join Document 表确保只查询该用户的标签
+    rows = (
+        db.query(DocumentTag.tag)
+        .join(Document, Document.id == DocumentTag.doc_id)
+        .filter(Document.user_id == user_id)
+        .distinct()
+        .all()
+    )
+    tags = sorted([r[0] for r in rows if r[0]])
+    return {"tags": tags}
 
 
 @app.post("/api/rag/query")
@@ -130,15 +240,57 @@ async def rag_query(
 ):
     user_id = 1
     question = body.get("query")
-    doc_ids = body.get("doc_ids")
     if not question:
         return JSONResponse({"error": "query required"}, status_code=400)
+
+    doc_ids_raw = body.get("doc_ids")
+    tags_raw = body.get("tags") or []
+
+    doc_ids: List[int] | None = None
+    if doc_ids_raw is not None:
+        if isinstance(doc_ids_raw, list):
+            doc_ids = [int(d) for d in doc_ids_raw if str(d).strip()]
+        else:
+            try:
+                doc_ids = [int(doc_ids_raw)]
+            except Exception:
+                doc_ids = []
+
+    tag_list = [str(t).strip() for t in tags_raw if str(t).strip()]
+    doc_ids_by_tags: List[int] = []
+    if tag_list:
+        doc_ids_by_tags = _docs.resolve_doc_ids_by_tags(db, user_id, tag_list)
+
+    final_doc_ids: List[int] | None = None
+    fallback_note: str | None = None
+
+    if doc_ids is not None and tag_list:
+        inter = sorted(set(doc_ids) & set(doc_ids_by_tags))
+        if inter:
+            final_doc_ids = inter
+        else:
+            final_doc_ids = None
+            fallback_note = "提示：选定标签未命中文档，已在全部知识中检索。"
+    elif doc_ids is not None:
+        final_doc_ids = doc_ids
+    elif tag_list:
+        if doc_ids_by_tags:
+            final_doc_ids = doc_ids_by_tags
+        else:
+            final_doc_ids = None
+            fallback_note = "提示：选定标签暂无命中文档，已在全部知识中检索。"
+
     result = _rag.query(
         db,
         user_id=user_id,
         question=question,
-        doc_ids=doc_ids,
+        doc_ids=final_doc_ids,
     )
+    if fallback_note:
+        result["answer"] = f"{fallback_note}\n{result.get('answer', '')}"
+        result["tag_fallback"] = True
+    result["applied_tags"] = tag_list or None
+    result["used_doc_ids"] = final_doc_ids
     return result
 
 
@@ -336,7 +488,59 @@ async def main_chat(
     text = str(body.get("query") or "").strip()
     if not text:
         return JSONResponse({"error": "query required"}, status_code=400)
-    result = _main_chat.handle_message(text, db)
+
+    # ===== 统一的 doc_ids / 标签 预处理逻辑 =====
+    # 复用 /api/rag/query 中的策略，避免分支逻辑分散在多个入口。
+    user_id = 1
+
+    doc_ids_raw = body.get("doc_ids")
+    tags_raw = body.get("tags") or []
+
+    doc_ids: List[int] | None = None
+    if doc_ids_raw is not None:
+        if isinstance(doc_ids_raw, list):
+            doc_ids = [int(d) for d in doc_ids_raw if str(d).strip()]
+        else:
+            try:
+                doc_ids = [int(doc_ids_raw)]
+            except Exception:
+                doc_ids = []
+
+    tag_list = [str(t).strip() for t in tags_raw if str(t).strip()]
+    doc_ids_by_tags: List[int] = []
+    if tag_list:
+        doc_ids_by_tags = _docs.resolve_doc_ids_by_tags(db, user_id, tag_list)
+
+    final_doc_ids: List[int] | None = None
+    # main_chat 这里不做降级提示文案，只负责决定是否启用 doc 级过滤；
+    # 文案仍由 RAG 层或上层对话决定是否追加。
+    if doc_ids is not None and tag_list:
+        inter = sorted(set(doc_ids) & set(doc_ids_by_tags))
+        if inter:
+            final_doc_ids = inter
+        else:
+            final_doc_ids = None
+    elif doc_ids is not None:
+        final_doc_ids = doc_ids
+    elif tag_list:
+        if doc_ids_by_tags:
+            final_doc_ids = doc_ids_by_tags
+        else:
+            final_doc_ids = None
+
+    result = _main_chat.handle_message(text, db, doc_ids=final_doc_ids)
+    print(
+        "CHAT debug: query=%r tags=%r doc_ids_by_tags=%r final_doc_ids=%r"
+        % (text, tag_list, doc_ids_by_tags, final_doc_ids)
+    )
+    # 为方便前端调试，补充本次实际生效的过滤信息
+    result.setdefault("meta", {})
+    result["meta"].update(
+        {
+            "applied_tags": tag_list or None,
+            "used_doc_ids": final_doc_ids,
+        }
+    )
     return result
 
 
@@ -366,6 +570,17 @@ async def complete_review(
     except ValueError:
         return JSONResponse({"error": "review not found"}, status_code=404)
     return {"review_id": review_id, "status": status}
+
+
+@app.get("/api/stats/dashboard")
+async def get_dashboard_stats(
+    db: Session = Depends(get_db),
+):
+    """获取仪表盘统计数据"""
+    user_id = 1
+    service = StatsService()
+    data = service.get_dashboard_stats(db, user_id=user_id)
+    return data
 
 
 @app.get("/api/weak-points")

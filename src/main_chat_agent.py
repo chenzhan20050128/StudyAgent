@@ -41,7 +41,17 @@ class MainChatAgent:
         self._user_id = user_id
 
     # ===== public =====
-    def handle_message(self, text: str, db: Session) -> Dict[str, Any]:
+    def handle_message(
+        self,
+        text: str,
+        db: Session,
+        doc_ids: List[int] | None = None,
+    ) -> Dict[str, Any]:
+        """处理消息入口，路由具体业务逻辑。
+
+        说明：
+        - RAG 检索所需的 doc_ids 预过滤逻辑统一放在 API 层（如 /api/chat、/api/rag/query），
+          MainChatAgent 只负责路由和透传，不再关心标签到文档 ID 的解析，避免逻辑分散。"""
         text = text.strip()
         if not text:
             return {"reply": "请告诉我你要做什么，比如提问、制定计划或做测验。"}
@@ -62,7 +72,7 @@ class MainChatAgent:
         elif intent == "review_today":
             reply = self._handle_review_today(db)
         else:  # 默认走 RAG
-            reply = self._handle_rag(text, db)
+            reply = self._handle_rag(text, db, doc_ids=doc_ids)
 
         # 针对列表类意图，追加一次 LLM 口语化润色，避免生硬拼接
         if intent in {
@@ -234,8 +244,23 @@ class MainChatAgent:
         return "rag_query"
 
     # ===== handlers =====
-    def _handle_rag(self, text: str, db: Session) -> str:
-        result = self._rag.query(db, user_id=self._user_id, question=text, doc_ids=None)
+    def _handle_rag(
+        self,
+        text: str,
+        db: Session,
+        doc_ids: List[int] | None = None,
+    ) -> str:
+        """调用 RAG 服务。
+
+        注意：
+        - doc_ids 的计算（包括标签过滤、与显式 doc_ids 的交集等）统一在 API 层完成，
+          这里仅做简单透传，保持 MainChatAgent 职责单一。"""
+        result = self._rag.query(
+            db,
+            user_id=self._user_id,
+            question=text,
+            doc_ids=doc_ids,
+        )
         answer = result.get("answer", "")
         return answer or "我没有检索到足够的依据来回答这个问题。"
 

@@ -7,6 +7,7 @@
     <title>StudyAgent 学习助手</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -28,7 +29,7 @@
 
         .layout {
             display: grid;
-            grid-template-columns: 320px 1fr;
+            grid-template-columns: 320px 1fr 320px;
             height: 100vh;
         }
 
@@ -41,10 +42,18 @@
             overflow-y: auto;
         }
 
+        .right-sidebar {
+            background: #0f1426;
+            border-left: 1px solid #1f2a44;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
         .sidebar-header {
             padding: 12px 10px;
             border-bottom: 1px solid #1f2a44;
-            font-size: 16px;
+            font-size: 32px;
             font-weight: 900;
             background: linear-gradient(135deg, #5c7cff, #7ee0ff);
             background-clip: text;
@@ -59,7 +68,7 @@
         }
 
         .section-title {
-            font-size: 6px;
+            font-size: 14px;
             font-weight: 700;
             color: #8d97bd;
             text-transform: uppercase;
@@ -124,7 +133,38 @@
             display: none;
         }
 
+        #upload-trigger-btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #5c7cff, #7ee0ff);
+            color: #0a0e27;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+            font-size: 16px;
+        }
+
         #upload-trigger-btn:hover {
+            transform: translateY(-1px);
+            opacity: 0.9;
+        }
+
+        #share-trigger-btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #5c7cff, #7ee0ff);
+            color: #0a0e27;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+            font-size: 16px;
+        }
+
+        #share-trigger-btn:hover {
             transform: translateY(-1px);
             opacity: 0.9;
         }
@@ -158,42 +198,42 @@
         }
 
         .review-tag {
-            font-size: 2px;
-            padding: 1px 2px;
-            border-radius: 1px;
+            font-size: 13px;
+            padding: 1px 4px;
+            border-radius: 4px;
             background: #1f2a44;
             color: #7ee0ff;
             font-weight: 700;
         }
 
         .review-meta {
-            font-size: 2px;
+            font-size: 13px;
             color: #565f89;
             text-align: right;
         }
 
         .review-text {
-            font-size: 3px;
+            font-size: 16px;
             color: #c0c8e5;
-            line-height: 1.0;
+            line-height: 1.4;
             font-weight: 500;
-            margin-top: 2px;
+            margin-top: 4px;
         }
 
         .review-detail {
-            font-size: 2px;
+            font-size: 14px;
             color: #8d97bd;
-            margin-top: 1px;
-            padding-top: 1px;
+            margin-top: 4px;
+            padding-top: 4px;
             border-top: 1px dashed #1f2a44;
-            line-height: 1.0;
+            line-height: 1.4;
         }
 
         .review-empty {
             text-align: center;
             color: #565f89;
             padding: 20px 0;
-            font-size: 6px;
+            font-size: 15px;
         }
 
         /* 主对话区域 - 占据 80% 视野感 */
@@ -413,6 +453,100 @@
 
         .modal-body {
             padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* 共享资料样式 */
+        .share-doc-list {
+            background: #0a0e27;
+            border: 1px solid #27334d;
+            border-radius: 10px;
+            padding: 10px;
+            max-height: 260px;
+            overflow-y: auto;
+        }
+
+        .share-doc-item {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: #11172b;
+            border: 1px solid transparent;
+            transition: border-color 0.2s, transform 0.1s;
+            color: #e6e8f2;
+            margin-bottom: 8px;
+        }
+
+        .share-doc-item:hover {
+            border-color: #5c7cff;
+            transform: translateY(-1px);
+        }
+
+        .share-doc-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin-top: 3px;
+            cursor: pointer;
+        }
+
+        .share-doc-title {
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .share-doc-meta {
+            color: #8d97bd;
+            font-size: 12px;
+            margin-top: 2px;
+        }
+
+        /* 标签选择样式 */
+        .tag-checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #1f2a44;
+            color: #e6e8f2;
+            cursor: pointer;
+        }
+
+        .tag-checkbox-item:last-child {
+            border-bottom: none;
+        }
+
+        .tag-checkbox-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        #tag-select-btn {
+            background: #1f2a44;
+            color: #8d97bd;
+            border: 1px solid #27334d;
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        #tag-select-btn:hover {
+            border-color: #5c7cff;
+            color: #7ee0ff;
+        }
+
+        #tag-select-btn.active {
+            background: rgba(92, 124, 255, 0.2);
+            border-color: #5c7cff;
+            color: #7ee0ff;
         }
     </style>
 </head>
@@ -426,7 +560,10 @@
             <!-- 上传区 -->
             <div class="sidebar-section">
                 <div class="section-title"><span>📁</span> 上传资料</div>
-                <button id="upload-trigger-btn">上传资料</button>
+                <div style="display: flex; gap: 8px;">
+                    <button id="upload-trigger-btn" style="flex: 1;">上传资料</button>
+                    <button id="share-trigger-btn" style="flex: 1;">共享资料</button>
+                </div>
             </div>
 
             <!-- 今日学习任务（日常任务） -->
@@ -483,6 +620,15 @@
 
             <div class="input-container">
                 <div class="input-wrapper">
+                    <button id="tag-select-btn" title="按标签过滤检索"
+                        style="background: transparent; border: none; color: #8d97bd; cursor: pointer; display: flex; align-items: center; padding: 0 4px; transition: color 0.2s;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z">
+                            </path>
+                            <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                        </svg>
+                    </button>
                     <textarea id="chat-input" placeholder="输入问题..." rows="1"></textarea>
                     <button id="chat-btn">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -491,6 +637,71 @@
                             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                         </svg>
                     </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧侧边栏：数据统计面板 -->
+        <div class="right-sidebar">
+            <div class="sidebar-header" style="border-bottom: 1px solid #1f2a44; text-align: center;">学习数据看板</div>
+
+            <div class="sidebar-section">
+                <!-- 顶部核心大指标: 仪表盘 -->
+                <div id="echarts-mastery" style="width: 100%; height: 180px;"></div>
+
+                <!-- 副指标并排 -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: -10px;">
+                    <div
+                        style="background: #11172b; padding: 12px; border-radius: 8px; text-align: center; border: 1px solid #1f2a44;">
+                        <div style="font-size: 12px; color: #8d97bd;">学习时长 (分钟)</div>
+                        <div style="font-size: 20px; font-weight: bold; color: #7ee0ff; margin-top: 4px;"
+                            id="stat-minutes">--</div>
+                    </div>
+                    <div
+                        style="background: #11172b; padding: 12px; border-radius: 8px; text-align: center; border: 1px solid #1f2a44;">
+                        <div style="font-size: 12px; color: #8d97bd;">打卡天数 (天)</div>
+                        <div style="font-size: 20px; font-weight: bold; color: #ffa07a; margin-top: 4px;"
+                            id="stat-days">--</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-title"><span>📈</span> 近7天学习图谱</div>
+                <!-- 柱状/折线趋势图 -->
+                <div id="echarts-trend" style="width: 100%; height: 160px; margin-top: 10px;"></div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-title"><span>�</span> 攻克重心分布</div>
+                <!-- 薄弱点分布饼图 -->
+                <div id="echarts-weak-points" style="width: 100%; height: 180px; margin-top: 5px;"></div>
+            </div>
+
+            <div class="review-container">
+                <div class="section-title"><span>⚠️</span> 重点攻克清单</div>
+                <div id="dashboard-weak-points">
+                    <div class="review-empty">正在拉取薄弱点...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 标签选择对话框 -->
+        <div id="tag-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>选择检索标签</h3>
+                    <button id="tag-modal-close">&times;</button>
+                </div>
+                <div id="tag-modal-body" class="modal-body">
+                    <div class="review-empty">正在拉取现有标签...</div>
+                </div>
+                <div
+                    style="padding: 16px 20px; border-top: 1px solid #1f2a44; display: flex; justify-content: flex-end; gap: 12px;">
+                    <button id="tag-clear-btn"
+                        style="background: transparent; border: 1px solid #1f2a44; color: #8d97bd; padding: 8px 16px; border-radius: 8px; cursor: pointer;">清空</button>
+                    <button id="tag-confirm-btn"
+                        style="background: linear-gradient(135deg, #5c7cff, #7ee0ff); border: none; color: #0a0e27; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600;">确认</button>
                 </div>
             </div>
         </div>
@@ -513,6 +724,31 @@
                 </div>
             </div>
         </div>
+
+        <!-- 共享资料对话框 -->
+        <div id="share-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>共享资料</h3>
+                    <button id="share-modal-close">&times;</button>
+                </div>
+                <div class="modal-body" style="display: flex; flex-direction: column; gap: 12px;">
+                    <div>
+                        <div style="color:#8d97bd; font-size:13px; margin-bottom:6px;">选择要共享的文档：</div>
+                        <div id="share-doc-list" class="share-doc-list">
+                            <div class="review-empty">正在加载文档列表...</div>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <span style="color:#8d97bd; font-size:13px;">目标 userId：</span>
+                        <input id="share-target-user" type="number" placeholder="例如 2" style="flex:1;" />
+                    </div>
+                    <button id="share-submit-btn"
+                        style="padding:12px; border:none; border-radius:8px; background:linear-gradient(135deg, #5c7cff, #7ee0ff); color:#0a0e27; font-weight:700; cursor:pointer;">确定共享</button>
+                    <div id="share-status" class="result" style="display:none;"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -528,21 +764,152 @@
         const uploadModal = qs('upload-modal');
         const modalClose = qs('modal-close');
 
-        // 显示模态对话框
+        // 共享对话框相关
+        const shareTriggerBtn = qs('share-trigger-btn');
+        const shareModal = qs('share-modal');
+        const shareModalClose = qs('share-modal-close');
+        const shareDocList = qs('share-doc-list');
+        const shareTargetUser = qs('share-target-user');
+        const shareSubmitBtn = qs('share-submit-btn');
+        const shareStatus = qs('share-status');
+
+        // 标签对话框相关
+        const tagSelectBtn = qs('tag-select-btn');
+        const tagModal = qs('tag-modal');
+        const tagModalClose = qs('tag-modal-close');
+        const tagModalBody = qs('tag-modal-body');
+        const tagConfirmBtn = qs('tag-confirm-btn');
+        const tagClearBtn = qs('tag-clear-btn');
+        let selectedTags = [];
+
+        // 显示上传模态
         uploadTriggerBtn.addEventListener('click', () => {
             uploadModal.style.display = 'block';
         });
 
-        // 关闭模态对话框
+        // 关闭上传模态
         modalClose.addEventListener('click', () => {
             uploadModal.style.display = 'none';
         });
 
-        // 点击模态背景关闭
-        uploadModal.addEventListener('click', (e) => {
-            if (e.target === uploadModal) {
-                uploadModal.style.display = 'none';
+        // 共享模态
+        shareTriggerBtn.addEventListener('click', async () => {
+            shareModal.style.display = 'block';
+            shareStatus.style.display = 'none';
+            shareTargetUser.value = '';
+            shareDocList.innerHTML = '<div class="review-empty">正在加载文档列表...</div>';
+            try {
+                const res = await fetch('/api/documents');
+                const data = await res.json();
+                const items = data.items || [];
+                if (!items.length) {
+                    shareDocList.innerHTML = '<div class="review-empty">暂无可共享的文档</div>';
+                    return;
+                }
+                shareDocList.innerHTML = items.map(d => `
+                    <label class="share-doc-item">
+                        <input type="checkbox" value="${d.doc_id}" />
+                        <div>
+                            <div class="share-doc-title">${d.title}</div>
+                            <div class="share-doc-meta">ID: ${d.doc_id} • ${d.source_type || 'file'} • 状态: ${d.status || '-'}
+                            </div>
+                        </div>
+                    </label>
+                `).join('');
+            } catch (e) {
+                shareDocList.innerHTML = '<div class="review-empty">加载失败</div>';
             }
+        });
+
+        shareModalClose.addEventListener('click', () => {
+            shareModal.style.display = 'none';
+        });
+
+        shareSubmitBtn.addEventListener('click', async () => {
+            const target = parseInt(shareTargetUser.value, 10);
+            const selected = Array.from(shareDocList.querySelectorAll('input:checked')).map(cb => parseInt(cb.value, 10));
+            if (!target) {
+                shareStatus.style.display = 'block';
+                shareStatus.style.color = '#ffa07a';
+                shareStatus.textContent = '请填写目标 userId';
+                return;
+            }
+            if (!selected.length) {
+                shareStatus.style.display = 'block';
+                shareStatus.style.color = '#ffa07a';
+                shareStatus.textContent = '请至少选择一份文档';
+                return;
+            }
+            shareStatus.style.display = 'block';
+            shareStatus.style.color = '#7ee0ff';
+            shareStatus.textContent = '正在共享...';
+            try {
+                const res = await fetch('/api/documents/share', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target_user_id: target, doc_ids: selected })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    const shared = data.shared || [];
+                    const failed = data.failed || [];
+                    shareStatus.style.color = '#7ee0ff';
+                    shareStatus.textContent = `共享成功 ${shared.length} 条${failed ? `，失败 ${failed.length} 条` : ''}`;
+                } else {
+                    shareStatus.style.color = '#ffa07a';
+                    shareStatus.textContent = data.error || '共享失败';
+                }
+            } catch (e) {
+                shareStatus.style.color = '#ffa07a';
+                shareStatus.textContent = '共享失败';
+            }
+        });
+
+        // 标签对话框逻辑
+        tagSelectBtn.addEventListener('click', async () => {
+            tagModal.style.display = 'block';
+            tagModalBody.innerHTML = '<div class="review-empty">正在加载标签列表...</div>';
+            try {
+                const res = await fetch('/api/tags');
+                const data = await res.json();
+                const tags = data.tags || [];
+                if (tags.length === 0) {
+                    tagModalBody.innerHTML = '<div class="review-empty">暂无可用标签。请先上传资料。</div>';
+                    return;
+                }
+                tagModalBody.innerHTML = tags.map(tag => `
+                    <label class="tag-checkbox-item">
+                        <input type="checkbox" value="${tag}" ${selectedTags.includes(tag) ? 'checked' : ''} />
+                        <span>${tag}</span>
+                    </label>
+                `).join('');
+            } catch (e) {
+                tagModalBody.innerHTML = '<div class="review-empty">加载标签失败</div>';
+            }
+        });
+
+        tagModalClose.addEventListener('click', () => {
+            tagModal.style.display = 'none';
+        });
+
+        tagClearBtn.addEventListener('click', () => {
+            tagModalBody.querySelectorAll('input:checked').forEach(cb => cb.checked = false);
+            selectedTags = [];
+            tagSelectBtn.style.color = '#8d97bd';
+        });
+
+        tagConfirmBtn.addEventListener('click', () => {
+            const checked = Array.from(tagModalBody.querySelectorAll('input:checked')).map(cb => cb.value);
+            selectedTags = checked;
+            tagSelectBtn.style.color = selectedTags.length > 0 ? '#7ee0ff' : '#8d97bd';
+            tagModal.style.display = 'none';
+        });
+
+        // 点击背景关闭
+        window.addEventListener('click', (e) => {
+            if (e.target === uploadModal) uploadModal.style.display = 'none';
+            if (e.target === tagModal) tagModal.style.display = 'none';
+            if (e.target === shareModal) shareModal.style.display = 'none';
         });
 
         // 自动高度文本域
@@ -666,7 +1033,10 @@
                 const res = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: text })
+                    body: JSON.stringify({
+                        query: text,
+                        tags: selectedTags.length > 0 ? selectedTags : null
+                    })
                 });
                 const data = await res.json();
                 appendMsg('ai', data.reply || '抱歉，我没有理解你的意思。');
@@ -807,6 +1177,7 @@
             await apiPost(`/api/daily-tasks/${taskId}/status`, { status });
             await loadTodayDailyTasks();
             await loadTodayReviews();
+            await loadDashboardStats();
         } catch (e) {
             console.error(e);
             alert("更新日常任务状态失败: " + e.message);
@@ -874,6 +1245,7 @@
         try {
             await apiPost(`/api/reviews/${reviewId}/complete`, { status });
             await loadTodayReviews();
+            await loadDashboardStats();
         } catch (e) {
             console.error(e);
             alert("更新复习任务状态失败: " + e.message);
@@ -932,9 +1304,180 @@
         try {
             await apiPost(`/api/weak-points/${id}/status`, { status });
             await loadWeakPoints();
+            await loadDashboardStats();
         } catch (e) {
             console.error(e);
             alert("更新薄弱点状态失败: " + e.message);
+        }
+    }
+
+    let chartMastery = null;
+    let chartTrend = null;
+    let chartWeakPoints = null;
+
+    // === Dashboard 数据面板相关 ===
+    async function loadDashboardStats() {
+        try {
+            const data = await apiGet('/api/stats/dashboard');
+
+            // 更新简单文本指标
+            document.getElementById('stat-minutes').innerText = data.total_learning_minutes || 0;
+            document.getElementById('stat-days').innerText = data.completed_task_days || 0;
+
+            // 1. ECharts 掌握度(仪表盘)
+            if (!chartMastery) {
+                chartMastery = echarts.init(document.getElementById('echarts-mastery'));
+                window.addEventListener('resize', () => chartMastery.resize());
+            }
+            const masteryScore = data.average_mastery_score || 0;
+            chartMastery.setOption({
+                series: [
+                    {
+                        type: 'gauge',
+                        startAngle: 180,
+                        endAngle: 0,
+                        min: 0,
+                        max: 100,
+                        splitNumber: 5,
+                        axisLine: {
+                            lineStyle: {
+                                width: 12,
+                                color: [
+                                    [0.3, '#ff6b6b'],
+                                    [0.7, '#ffa07a'],
+                                    [1, '#75fb9c']
+                                ]
+                            }
+                        },
+                        pointer: {
+                            length: '60%',
+                            width: 4,
+                            itemStyle: { color: 'auto' }
+                        },
+                        axisTick: { show: false },
+                        splitLine: { show: false },
+                        axisLabel: { show: false },
+                        title: {
+                            offsetCenter: [0, '80%'],
+                            fontSize: 12,
+                            color: '#8d97bd'
+                        },
+                        detail: {
+                            fontSize: 24,
+                            offsetCenter: [0, '50%'],
+                            valueAnimation: true,
+                            formatter: function (value) {
+                                return Math.round(value) + '分';
+                            },
+                            color: '#e6e8f2'
+                        },
+                        data: [{ value: masteryScore, name: '知识掌握度' }]
+                    }
+                ]
+            });
+
+            // 2. ECharts 趋势(柱状图)
+            if (!chartTrend) {
+                chartTrend = echarts.init(document.getElementById('echarts-trend'));
+                window.addEventListener('resize', () => chartTrend.resize());
+            }
+            const trend = data.last_7_days_trend || [];
+            const xAxisData = trend.map(t => t.date.slice(5)); // MM-DD
+            const seriesData = trend.map(t => {
+                let color = '#1f2a44';
+                if (t.status === 'completed') color = '#7ee0ff';
+                else if (t.status === 'pending' || t.status === 'skipped') color = '#565f89';
+                return {
+                    value: t.minutes,
+                    itemStyle: { color: color }
+                };
+            });
+            chartTrend.setOption({
+                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                grid: { left: '2%', right: '4%', bottom: '0%', top: '10%', containLabel: true },
+                xAxis: {
+                    type: 'category',
+                    data: xAxisData,
+                    axisLabel: { color: '#8d97bd', fontSize: 10 },
+                    axisLine: { lineStyle: { color: '#1f2a44' } },
+                    axisTick: { show: false }
+                },
+                yAxis: {
+                    type: 'value',
+                    splitLine: { lineStyle: { color: '#1f2a44', type: 'dashed' } },
+                    axisLabel: { color: '#8d97bd', fontSize: 10 }
+                },
+                series: [{
+                    name: '学习时长(分钟)',
+                    type: 'bar',
+                    barWidth: '50%',
+                    itemStyle: { borderRadius: [4, 4, 0, 0] },
+                    data: seriesData
+                }]
+            });
+
+            // 3. ECharts 薄弱点分布(环形饼图)
+            if (!chartWeakPoints) {
+                chartWeakPoints = echarts.init(document.getElementById('echarts-weak-points'));
+                window.addEventListener('resize', () => chartWeakPoints.resize());
+            }
+            const awp = data.active_weak_points || { high: 0, medium: 0 };
+            const wData = [
+                { name: '严重', value: awp.high || 0, itemStyle: { color: '#ff6b6b' } },
+                { name: '中等', value: awp.medium || 0, itemStyle: { color: '#ffa07a' } },
+            ];
+            if (wData[0].value === 0 && wData[1].value === 0) {
+                wData.push({ name: '良好', value: 1, itemStyle: { color: '#75fb9c' } });
+            }
+            chartWeakPoints.setOption({
+                tooltip: { trigger: 'item' },
+                legend: { bottom: '0%', left: 'center', textStyle: { color: '#8d97bd', fontSize: 10 }, icon: 'circle' },
+                series: [
+                    {
+                        name: '薄弱点数量',
+                        type: 'pie',
+                        radius: ['50%', '75%'],
+                        center: ['50%', '42%'],
+                        avoidLabelOverlap: false,
+                        label: { show: false, position: 'center' },
+                        emphasis: {
+                            label: {
+                                show: true,
+                                fontSize: 12,
+                                fontWeight: 'bold',
+                                color: '#e6e8f2'
+                            }
+                        },
+                        labelLine: { show: false },
+                        data: wData
+                    }
+                ]
+            });
+
+            // Top 10 薄弱点 (保持文字清单方便直接看提示)
+            const wpsContainer = document.getElementById('dashboard-weak-points');
+            const recentWps = data.recent_weak_points || [];
+            if (!recentWps.length) {
+                wpsContainer.innerHTML = '<div class="review-empty">太棒了！暂无重要薄弱点。</div>';
+            } else {
+                wpsContainer.innerHTML = '';
+                recentWps.forEach(wp => {
+                    const color = wp.level === 'high' ? '#ff6b6b' : '#ffa07a';
+                    const div = document.createElement('div');
+                    div.style = 'background: #11172b; padding: 10px; margin-bottom: 8px; border-radius: 8px; border: 1px solid #1f2a44;';
+                    div.innerHTML = `
+                        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                            <div style="font-size:12px; font-weight:bold; color:#e6e8f2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${wp.description}">${wp.description}</div>
+                            <div style="font-size:10px; background:${color}33; color:${color}; padding:2px 6px; border-radius:4px; flex-shrink:0; margin-left:8px;">${wp.level}</div>
+                        </div>
+                        <div style="font-size:10px; color:#565f89; margin-top:4px;">发现于: ${wp.created_at.slice(0, 10)}</div>
+                    `;
+                    wpsContainer.appendChild(div);
+                });
+            }
+
+        } catch (e) {
+            console.error('获取统计数据失败', e);
         }
     }
 
@@ -942,10 +1485,10 @@
     const style = document.createElement("style");
     style.textContent = `
         .mini-btn {
-            padding: 1px 3px;
-            border-radius: 2px;
+            padding: 4px 8px;
+            border-radius: 4px;
             border: none;
-            font-size: 4px;
+            font-size: 11px;
             cursor: pointer;
             background: #1f2a44;
             color: #e6e8f2;
@@ -963,5 +1506,6 @@
         loadTodayDailyTasks();
         loadTodayReviews();
         loadWeakPoints();
+        loadDashboardStats();
     });
 </script>
