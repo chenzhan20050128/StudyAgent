@@ -51,6 +51,11 @@ class QuizChatState(TypedDict, total=False):
 
 class QuizChatAgent:
     def __init__(self, quiz_service: QuizService, llm: LLMClient) -> None:
+        # QuizChatAgent：测验对话代理
+        # 维护一个“待回答的问题”的内存状态：
+        # - _pending_quiz_id：上一题的 quiz_id（等待用户回答）
+        # - _pending_question：上一题题面（用于展示/提示、以及可能的追问）
+        # 用户说“再来一题”时会生成新题；用户给出“答案/我选X”时会提交批改。
         self._quiz_service = quiz_service
         self._llm = llm
         self._pending_quiz_id: Optional[int] = None
@@ -59,10 +64,15 @@ class QuizChatAgent:
         self._graph = self._build_graph()
 
     def has_pending_quiz(self) -> bool:
+        # 是否处于“我已出题，等你回答”的状态
         return self._pending_quiz_id is not None
 
     # ===== 公开入口 =====
     def handle_message(self, text: str, db: Session) -> str:
+        # 入口：把用户一句话视为一个事件
+        # - 先 detect_intent（generate / answer / list_weak_points / list_history）
+        # - 再 parse_slots（尽量补齐 question_type/description/answer/doc_ids）
+        # - 最后 act：调用 QuizService 的 generate/submit，并更新 pending 状态
         cleaned = text.strip()
         if not cleaned:
             return "你可以这样说：\n" "帮我出一道 Python 语法的单选题\n"

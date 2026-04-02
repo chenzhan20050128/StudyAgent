@@ -11,8 +11,6 @@
 
 from __future__ import annotations
 
-from typing import NoReturn
-
 from src.db import Base, engine, SessionLocal
 from src.llm_client import LLMClient
 from src.rag_service import RAGService
@@ -25,8 +23,10 @@ from src.quiz_chat_agent import QuizChatAgent
 from src.main_chat_agent import MainChatAgent
 
 
-def main() -> NoReturn:
-    # 初始化与 main.py 一致的依赖
+def main() -> None:
+    # 初始化与 main.py 一致的依赖（便于“脱离 HTTP”在 CLI 下复现问题）
+    # - Base.metadata.create_all: 确保本地 MySQL 表存在
+    # - vec/llm/rag/plans/quizzes/reviews: 与后端服务使用同一套对象
     Base.metadata.create_all(bind=engine)
 
     vec = MilvusVectorStore()
@@ -39,6 +39,7 @@ def main() -> NoReturn:
     quiz_chat = QuizChatAgent(quizzes, llm)
     agent = MainChatAgent(llm, rag, plan_chat, quiz_chat, reviews)
 
+    # 交互式循环：每输入一句自然语言，就走一次 agent.handle_message 路由
     print("StudyAgent 主对话 CLI 已启动。输入 exit/quit 可退出。\n")
 
     while True:
@@ -56,6 +57,8 @@ def main() -> NoReturn:
 
         with SessionLocal() as db:
             try:
+                # 这里复用 MainChatAgent 的意图识别 + 路由：
+                # - create_plan/quiz/review_today/rag_query 等都会在内部自动分发
                 result = agent.handle_message(text, db)
             except Exception as exc:  # noqa: BLE001
                 print(f"[ERROR] 处理出错：{exc}")

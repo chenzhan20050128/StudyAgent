@@ -9,6 +9,19 @@ Pipeline:
 4) Reply is synthesized to speech via Qwen TTS Realtime and played locally.
 
 All important stages log to stdout for monitoring.
+
+中文说明（面试/演示用途）：
+- 这个脚本不走 FastAPI / 业务数据库，而是一个“语音闭环 demo”。
+- 目标是把语音交互拆成 3 个可替换模块：
+    1) ASR：负责麦克风采集 + VAD 断句 + 转写文本（只产出文字）
+    2) LLM：收到一句完整转写后生成回复（非流式，逻辑更直观）
+    3) TTS：把回复合成 PCM 音频流并本地播放
+
+并发模型：
+- 主线程持续把麦克风音频 push 给 Omni realtime（低延迟流式输入）。
+- ASR 回调线程在“断句完成”事件里把 transcript 放入 task_queue。
+- worker 线程阻塞消费 task_queue：调用 LLM -> 调用 TTS -> 播放。
+- 当 VAD 识别到用户再次开口时，会立即 cancel 当前播放，减少“打断感”。
 """
 
 import base64
@@ -69,7 +82,9 @@ def build_llm_client() -> OpenAI:
 
 
 # === Global runtime objects ===
+# task_queue：ASR 断句完成后，把文本排队交给 worker 线程处理。
 task_queue: "queue.Queue[str]" = queue.Queue()
+# stop_event：用于 Ctrl+C 退出时通知 worker 线程停止。
 stop_event = threading.Event()
 mic_stream = None
 player: Optional[B64PCMPlayer] = None
@@ -79,6 +94,8 @@ llm_client: Optional[OpenAI] = None
 
 class AsrCallback(OmniRealtimeCallback):
     def on_open(self) -> None:
+        # ASR websocket 建立成功：打开麦克风输入流。
+        # 这里采样率 16kHz、单声道、16bit，匹配 Omni realtime 的输入格式。
         global mic_stream
         print("[ASR] connection opened, init microphone ...")
         pya = pyaudio.PyAudio()
@@ -90,6 +107,10 @@ class AsrCallback(OmniRealtimeCallback):
         print(f"[ASR] connection closed code={close_status_code}, " f"msg={close_msg}")
 
     def on_event(self, response: Any) -> None:
+        # Omni realtime 事件回调：
+        # - session.created：连接建立
+        # - speech_started：VAD 检测到用户开始说话（用于打断播放）
+        # - transcription.completed：一句话转写完成（真正的“触发点”）
         try:
             evt_type = response.get("type") if isinstance(response, dict) else None
             if evt_type == "session.created":
@@ -102,6 +123,7 @@ class AsrCallback(OmniRealtimeCallback):
             if evt_type == "conversation.item.input_audio_transcription.completed":
                 transcript = response.get("transcript", "")
                 print(f"[ASR] transcript completed: {transcript}")
+                # 把一句完整文本交给 worker：避免在回调线程里做耗时的 LLM/TTS 调用
                 task_queue.put(transcript)
         except Exception as exc:
             print(f"[ASR][Error] {exc}")
@@ -120,6 +142,9 @@ class TtsCallback(QwenTtsRealtimeCallback):
         self.done_event.set()
 
     def on_event(self, response: Any) -> None:
+        # TTS realtime 事件回调：
+        # - response.audio.delta：服务端持续推送 base64 PCM 分片
+        # - response.done：本次合成结束
         try:
             evt_type = response.get("type") if isinstance(response, dict) else None
             if evt_type == "session.created":
@@ -140,6 +165,9 @@ class TtsCallback(QwenTtsRealtimeCallback):
 
 
 def call_llm(client: OpenAI, query: str) -> Optional[str]:
+    # LLM 调用（非流式）：
+    # - 用 OpenAI-compatible 接口调用 DashScope 的 qwen3.5-flash
+    # - 系统提示词强调“简洁、口语化”，适合语音播报
     print(f"[LLM] start call, input='{query}'")
     try:
         completion = client.chat.completions.create(
@@ -161,6 +189,9 @@ def call_llm(client: OpenAI, query: str) -> Optional[str]:
 
 
 def synthesize_and_play(text: str, pya: pyaudio.PyAudio, player_ref: B64PCMPlayer):
+    # TTS 合成 + 播放：
+    # - 通过 QwenTtsRealtime websocket 获取 PCM 音频分片
+    # - 交给 B64PCMPlayer 边接收边播放
     print(f"[TTS] start synthesis: {text}")
     tts_callback = TtsCallback(player_ref)
     tts_client = QwenTtsRealtime(
@@ -183,6 +214,9 @@ def synthesize_and_play(text: str, pya: pyaudio.PyAudio, player_ref: B64PCMPlaye
 
 
 def llm_tts_worker(pya: pyaudio.PyAudio):
+    # worker 线程：
+    # - 阻塞等待 ASR 断句结果
+    # - 串行执行 LLM -> TTS，避免并发“抢播”
     while not stop_event.is_set():
         try:
             text = task_queue.get(timeout=0.5)
@@ -199,6 +233,7 @@ def llm_tts_worker(pya: pyaudio.PyAudio):
 
 
 def signal_handler(sig, frame):
+    # Ctrl+C 退出：关闭 websocket / 播放器，通知 worker 停止
     print("[SYS] Ctrl+C pressed, stopping ...")
     stop_event.set()
     if conversation:
@@ -209,6 +244,8 @@ def signal_handler(sig, frame):
 
 
 if __name__ == "__main__":
+    # 运行方式：直接 python run_custom_dialog.py
+    # 前置条件：设置环境变量 DASHSCOPE_API_KEY，且本机可访问麦克风与音频输出。
     init_dashscope_api_key()
     llm_client = build_llm_client()
 
@@ -238,6 +275,7 @@ if __name__ == "__main__":
     print("[SYS] Ready. Speak into the microphone. Press Ctrl+C to exit.")
     last_log = time.time()
     while True:
+        # 主循环：持续读取麦克风 PCM -> base64 -> append_audio 推送给 ASR
         if mic_stream is None:
             time.sleep(0.05)
             continue

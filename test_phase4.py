@@ -33,6 +33,12 @@ def _print_section(title: str) -> None:
 
 
 def test_phase4_review_roundtrip() -> None:
+    # 端到端目标：
+    # 1) 创建计划 -> daily_tasks 落库
+    # 2) complete daily_task，并把 completed_date 设为昨天：让 stage=0 的复习落在今天
+    # 3) /api/reviews/today 应能查到 pending 复习
+    # 4) 完成一条复习后，再查 today，待办应减少
+    # 5) 再覆盖 weak_point 触发的复习排期：create_for_weak_point -> 今日应可见
     _print_section("阶段四：复习排期与闭环")
     log = "[PHASE4_TEST]"
     review_service = ReviewService()
@@ -123,7 +129,7 @@ def test_phase4_review_roundtrip() -> None:
     assert len(after_items) <= len(items) - 1, "完成后待办应减少"
     print(f"{log} today reviews after complete: {len(after_items)}")
 
-    # 覆盖薄弱点复习排期
+    # 覆盖薄弱点复习排期：模拟一条 WeakPoint，并验证它能在 today reviews 出现
     with SessionLocal() as db:
         wp = WeakPoint(
             user_id=1,

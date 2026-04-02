@@ -34,9 +34,13 @@ def _print_section(title: str) -> None:
 
 
 def test_phase2_plan_roundtrip():
+    # 端到端目标：
+    # 1) 调用 /api/plans/create 生成计划（LLM 生成 syllabus + allocate 到 daily_tasks）
+    # 2) 再调用 /api/plans/{plan_id}/daily-tasks 读取任务，验证 API 输出结构
+    # 3) 直接查 MySQL：learning_plans/daily_tasks 是否持久化、日期范围是否一致
     _print_section("阶段二：计划生成")
 
-    # 2) 创建 3 天计划
+    # 创建 3 天计划（今天-后天），每日 45 分钟
     start = date.today()
     end = start + timedelta(days=2)
     body = {
@@ -57,7 +61,7 @@ def test_phase2_plan_roundtrip():
     assert payload.get("plan_id")
     assert payload.get("daily_plan"), "daily_plan 不能为空"
 
-    # 3) 查询每日任务
+    # 查询每日任务（API 读取落库任务 + outline_json）
     plan_id = payload["plan_id"]
     task_resp = client.get(f"/api/plans/{plan_id}/daily-tasks")
     assert task_resp.status_code == 200
@@ -65,7 +69,7 @@ def test_phase2_plan_roundtrip():
     assert tasks, "应至少有一天任务"
     assert all("outline" in t for t in tasks)
 
-    # 4) MySQL 持久化校验：learning_plans / daily_tasks 是否存在且匹配
+    # MySQL 持久化校验：learning_plans / daily_tasks 是否存在且匹配
     with SessionLocal() as session:
         plan_row = session.get(LearningPlan, plan_id)
         assert plan_row is not None, "learning_plans 中应存在该计划"

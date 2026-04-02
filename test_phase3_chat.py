@@ -19,6 +19,8 @@ from src.vector_store import MilvusVectorStore
 
 
 def main() -> int:
+    # 命令行多轮测验：验证 QuizChatAgent 的“出题->答题->批改”闭环。
+    # 注意：QuizChatAgent 内部维护 pending_quiz_id，用于判断用户是否在回答上一题。
     vec = MilvusVectorStore()
     llm = LLMClient()
     quiz_service = QuizService(vec, llm)

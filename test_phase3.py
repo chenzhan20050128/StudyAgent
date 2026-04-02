@@ -35,6 +35,12 @@ def _print_section(title: str) -> None:
 
 
 def test_phase3_quiz_roundtrip() -> None:
+    # 端到端目标：
+    # 1) /api/quizzes/generate：生成题目（不回传 answer）
+    # 2) MySQL quizzes：题目 question_json 中必须包含 answer（可批改）
+    # 3) /api/quizzes/{id}/submit：错答触发低分路径；正答触发高分路径
+    # 4) MySQL quiz_attempts：至少 2 条记录（错答+正答）
+    # 5) 若错答低分：weak_points 应生成（后续复习链路依赖它）
     _print_section("阶段三：测验与批改")
     log = "[PHASE3_TEST]"
 
@@ -141,6 +147,8 @@ def test_phase3_quiz_roundtrip() -> None:
             },
         )
 
+        # score < 4 触发薄弱点：此处不依赖“最新 attempt 一定是错答”，
+        # 而是按 quiz_id + user_id 查询 weak_points，更稳。
         if wrong_score < 4:
             weak_rows = (
                 session.query(WeakPoint)
@@ -169,6 +177,7 @@ def test_phase3_quiz_roundtrip() -> None:
 
 
 def test_phase3_short_answer_excel() -> None:
+    # 覆盖主观题批改路径（LLM 评分 + comment/weak_point），与客观题规则判卷不同。
     _print_section("阶段三：简答题（Python处理Excel）")
     log = "[PHASE3_TEST]"
 

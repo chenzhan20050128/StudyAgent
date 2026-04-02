@@ -4,6 +4,22 @@
 - 对用户“无感知”的多 Agent 整合：一个 handle_message 入口即可完成五大核心功能。
 - 轻量规则 + 可选 LLM 意图识别，避免强依赖外部服务时的脆弱。
 - 复用现有子 Agent / Service，不重复业务逻辑。
+
+需求
+- 为 API 层提供一个统一的对话入口：用户一句话即可触达问答/计划/测验/复习等能力。
+
+业务逻辑
+- 轻量意图识别：优先用规则（关键字/前缀）快速判断；必要时可调用 LLM 做辅助识别。
+- 路由执行：
+    - 计划类意图 -> 交给 `PlanChatAgent` 做多轮槽位补齐与计划生成。
+    - 测验类意图 -> 交给 `QuizChatAgent` 做“出题/提交/追问”。
+    - 复习类意图 -> 调 `ReviewService` 查询今日复习清单。
+    - 其余 -> 默认走 `RAGService` 问答兜底。
+- 会话级透传：仅负责把 user_id / doc_ids / db session 传递给子模块，避免重复实现业务。
+
+主要实现方式
+- 组合模式：MainChatAgent 只做 orchestration（编排/路由），核心业务留在各自 Service/Agent。
+- 与 API 的职责边界：doc_ids 等“上游过滤”在 API 层完成，本类只透传。
 """
 
 from __future__ import annotations
@@ -33,6 +49,12 @@ class MainChatAgent:
         review_service: ReviewService,
         user_id: int = 1,
     ) -> None:
+        # MainChatAgent：API 层使用的“主入口代理”
+        # 目的：把多个子 agent 组合起来，并负责会话级上下文传递
+        # - PlanChatAgent：计划多轮对话
+        # - QuizChatAgent：测验连续对话（出题/提交/追问）
+        # - ReviewService：今日复习清单
+        # - RAGService：默认问答兜底
         self._llm = llm
         self._rag = rag_service
         self._plan_agent = plan_agent

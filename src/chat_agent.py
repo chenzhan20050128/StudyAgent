@@ -35,6 +35,12 @@ class PlanSlots(TypedDict, total=False):
 
 class PlanChatAgent:
     def __init__(self, plan_service: PlanService, llm: LLMClient) -> None:
+        # PlanChatAgent：学习计划“对话代理”（面向自然语言、多轮追问）
+        # 设计原则：
+        # - 不改 PlanService/PlanWorkflow 的核心生成逻辑
+        # - 用 LLM 做槽位抽取，把一句话转成可执行的参数
+        # - 缺参数就追问（goal/日期范围/每日分钟数），直到能落地生成
+        # - 支持 adjust_plan：取消旧 plan 未完成任务后，重新生成新计划
         self._plan_service = plan_service
         self._llm = llm
         self._slots: PlanSlots = {}
@@ -43,6 +49,10 @@ class PlanChatAgent:
 
     # ===== 公开入口 =====
     def handle_message(self, text: str, db: Session) -> str:
+        # 入口：每来一条用户消息，就尝试
+        # 1) 判断意图（create/adjust/show）
+        # 2) 抽取槽位并合并到历史槽位（多轮对话累积信息）
+        # 3) 若缺关键槽位则返回追问；齐全则调用 PlanService 生成/调整
         text = text.strip()
         if not text:
             return "请告诉我你的学习目标、时间范围和每天可用时间。"
@@ -51,7 +61,7 @@ class PlanChatAgent:
         self._intent = self._detect_intent(text)
         logger.info("chat_agent.intent=%s", self._intent)
 
-        # 查看计划详情的快速通道
+        # 查看计划详情的快速通道：不需要槽位抽取，直接读取数据库最新计划
         if self._intent == "show_plan":
             plan_id = self._current_plan_id
             if not plan_id:
@@ -62,6 +72,7 @@ class PlanChatAgent:
                 return self._describe_plan(db, plan_id)
             return "当前没有可查看的计划，请先创建一个学习计划。"
 
+        # LLM 槽位抽取：把自然语言解析成 goal/start/end/daily_minutes/doc_ids 等字段
         parsed = self._parse_slots_with_llm(text)
         print(f"[SLOT] parsed_slots={parsed}")
         self._merge_slots(parsed)
@@ -106,18 +117,18 @@ class PlanChatAgent:
         print(f"[SLOT] merged_slots={self._slots}")
         print(f"[SLOT] slots_current={self._slots}")
 
-        
         missing = self._missing_fields(self._slots)
         if missing:
+            # 槽位不全：把“缺什么”翻译成自然语言问题，继续追问用户
             print(f"[SLOT] missing_fields={missing}")
-            
+
             # 将缺失字段映射为用户友好的中文描述
             field_mapping = {
                 "goal_description(学习目标)": "学习目标（比如：想学什么、要达到什么水平）",
                 "daily_minutes(每天时长)": "每天可投入的学习时间（比如：每天1小时、30分钟等）",
-                "start/end 或 target_days": "时间安排（比如：总共几天、从哪天到哪天）"
+                "start/end 或 target_days": "时间安排（比如：总共几天、从哪天到哪天）",
             }
-            
+
             friendly_missing = []
             for field in missing:
                 if field in field_mapping:
@@ -128,13 +139,17 @@ class PlanChatAgent:
                     friendly_missing.append("每天学习时长")
                 else:
                     friendly_missing.append(field)
-            
+
             if len(friendly_missing) == 1:
-                return f"要给你制定完美的学习计划，我还需要知道{friendly_missing[0]}哦～"
+                return (
+                    f"要给你制定完美的学习计划，我还需要知道{friendly_missing[0]}哦～"
+                )
             elif len(friendly_missing) == 2:
                 return f"为了让计划更合你心意，需要补充这两个信息：{friendly_missing[0]}和{friendly_missing[1]}"
             else:
-                missing_str = "、".join(friendly_missing[:-1]) + f"和{friendly_missing[-1]}"
+                missing_str = (
+                    "、".join(friendly_missing[:-1]) + f"和{friendly_missing[-1]}"
+                )
                 return f"咱们就差最后几步啦！请告诉我{missing_str}，马上为你量身打造学习计划～"
 
         try:

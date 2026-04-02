@@ -6,6 +6,24 @@
 
 - 为兼容无 langgraph 环境，工作流节点按顺序执行；若检测到 langgraph，可动态编译 StateGraph，但不会阻塞主流程。
 - 所有 JSON 解析均提供兜底策略，避免 LLM 输出格式偏差导致计划生成中断。
+
+需求
+- 把“用户目标 + 时间范围 + 每日时长 + 可选文档范围”转成可执行的学习计划。
+- 输出并落库两层结构：LearningPlan（总计划）+ DailyTask（每日任务）。
+
+业务逻辑
+- 目标扩展：将 goal_description 拆成更细的主题列表（topics），便于检索与组织。
+- 知识覆盖检查：对每个主题做向量库检索，产出 topic_hits，并标记 not_covered（命中为空的主题）。
+- 大纲生成：基于“检索到的真实片段 + 目标约束”让 LLM 生成 syllabus（单元/主题/预计时长）。
+- 日计划拆分：把 syllabus 的预计时长按天数与 daily_minutes 约束切分成 daily_tasks。
+- 可靠性兜底：
+    - 没有 langgraph 时顺序执行节点；有 langgraph 时编译为 StateGraph（不影响主流程）。
+    - LLM 输出解析失败时提供默认/降级策略，避免整条链路中断。
+
+主要实现方式
+- LLM：通过 `LLMClient` 做 chat 与结构化 JSON 输出（带解析兜底）。
+- 检索：通过 `MilvusVectorStore.hybrid_search()` 对 topic 做召回（必要时可用 doc_ids 限定范围）。
+- 持久化：使用 SQLAlchemy Session 写入 `LearningPlan` / `DailyTask` 并提供查询能力。
 """
 
 from __future__ import annotations
@@ -148,8 +166,11 @@ class PlanWorkflow:
     """
 
     def __init__(self, vec: MilvusVectorStore, llm: LLMClient) -> None:
+        # vec: 用户知识库检索入口（hybrid_search）
+        # llm: 目标拆分/大纲生成所需的 LLM
         self._vec = vec
         self._llm = llm
+        # 可选：若安装了 langgraph，则编译成状态图；否则走顺序执行兜底
         self._graph = self._build_graph()
 
     # ===== 图编排（可选） =====
@@ -160,6 +181,7 @@ class PlanWorkflow:
         - 若可用，编译图以支持并行执行和状态管理
         """
         if not StateGraph or START is None or END is None:
+            # 缺少 langgraph 时不阻塞主流程；后续 run() 会按顺序执行节点
             return None
         g = StateGraph(PlanState)
         g.add_node("expand_goal", self._expand_goal)
@@ -181,6 +203,7 @@ class PlanWorkflow:
         将用户的学习目标自然语言描述拆分为 3-6 个具体的子主题。
         例如："掌握Python机器学习" -> ["Python基础", "NumPy/Pandas", "算法原理", ...]
         """
+        # 节点 1：把用户的“学习大目标”拆成若干可检索的小主题（3~6 个）
         goal = state.get("goal_description", "")
         t0 = time.perf_counter()
         prompt = (
@@ -188,6 +211,7 @@ class PlanWorkflow:
             '仅返回 JSON 数组，例如: ["Python 基础", "数据结构"].\n'
             f"用户目标: {goal}"
         )
+        # 输出约束为 JSON 数组，避免模型输出散文导致解析失败
         raw = self._llm.chat(prompt)
         topics = self._safe_parse_list(raw)
         if not topics:
@@ -218,6 +242,7 @@ class PlanWorkflow:
         if user_id is None:
             raise ValueError("user_id is required for plan workflow")
 
+        # 节点 2：对每个子主题做检索，确保计划“有真实资料支撑”
         for topic in state.get("topics", []):
             # 组合目标和子主题作为查询，提高检索精度
             q = f"{goal} | {topic}"
@@ -232,6 +257,7 @@ class PlanWorkflow:
                 limit=12,
             )
             if not hits:
+                # 知识库中没有覆盖该主题：后续会回传 not_covered，提示用户补充资料
                 not_covered.append(topic)
             else:
                 topic_hits[topic] = hits
@@ -261,6 +287,12 @@ class PlanWorkflow:
         5. 若大纲总时长超预算，按比例缩放
         6. 若 LLM 输出为空，使用检索结果作兜底方案
         """
+        # 节点 3：生成学习大纲（syllabus）
+        # 核心原则：
+        # - 只基于检索到的真实片段归纳（不允许凭空编造）
+        # - 使用 JSON Schema 约束输出结构可解析
+        # - 强制控制总学习时长 <= 预算（天数 * daily_minutes），并做兜底校准
+
         # 收集上下文，限制总量防止 prompt 过长
         snippets: List[str] = []
         for topic, hits in state.get("topic_hits", {}).items():
@@ -410,7 +442,7 @@ class PlanWorkflow:
                     last_est = int(last.get("estimated_minutes") or 0)
                     last["estimated_minutes"] = max(20, last_est - overflow)
 
-        # 若 LLM 输出为空，按检索结果兜底构造
+        # 若 LLM 输出为空，按检索结果兜底构造（保证主流程不被模型波动卡死）
         if not syllabus:
             syllabus = self._fallback_syllabus(state)
         state["syllabus"] = syllabus
@@ -436,6 +468,12 @@ class PlanWorkflow:
         5. 生成日标题（显示当天的主题名称）
         """
         t0 = time.perf_counter()
+        # 节点 4：把大纲拆成“每日学习任务”
+        # 算法是典型的“队列 + 贪心分配”，并带三个关键边界规则：
+        # 1) 当天已有内容时，遇到超时 topic 就停止（留给明天）
+        # 2) 当天无内容时，即使超时也强塞一个，避免空日
+        # 3) 最后一天无条件把剩余全部塞进去，确保不遗漏
+
         # 展开大纲为主题队列，方便按顺序分配
         topics_queue = self._flatten_topics(state.get("syllabus", []))
         start = state.get("start_date")
@@ -685,6 +723,9 @@ class PlanService:
         3. 将每日任务写入 daily_tasks 表
         4. 返回计划ID、大纲、日计划和未覆盖的主题
         """
+        # 对外服务入口：执行工作流得到 syllabus/daily_plan/not_covered，然后落库
+        # 这里的“落库”保证：计划生成一次即可持久化，后续可查看/统计/复习联动
+
         # 执行工作流
         state = self._workflow.run(
             PlanInput(
@@ -697,7 +738,7 @@ class PlanService:
             )
         )
 
-        # 创建学习计划记录
+        # 创建学习计划记录（learning_plans）
         plan = LearningPlan(
             user_id=user_id,
             goal_text=goal_description,
@@ -709,7 +750,7 @@ class PlanService:
         db.add(plan)
         db.flush()
 
-        # 创建日常任务记录
+        # 创建日常任务记录（daily_tasks）：每天一条，outline_json 保存结构化大纲与溯源信息
         tasks_to_add: List[DailyTask] = []
         for item in state.get("daily_plan", []):
             tasks_to_add.append(

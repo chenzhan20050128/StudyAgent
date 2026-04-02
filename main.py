@@ -29,6 +29,7 @@ logging.basicConfig(
     force=True,
 )
 
+# FastAPI 应用入口：承载文档上传、RAG 问答、计划、测验、复习、统计等 HTTP API
 app = FastAPI(title="StudyAgent 基础能力")
 
 # 前端静态页挂载
@@ -40,18 +41,30 @@ async def index():
     return FileResponse("frontend/index2.html")
 
 
+# 初始化（或自动创建）本地 MySQL 表结构：所有业务数据（文档、标签、计划、测验、复习等）都在这里落库
 Base.metadata.create_all(bind=engine)
 
+# ===== 全局单例依赖（简化 demo：生产可换成依赖注入容器/生命周期管理） =====
+# 分块器：把长文本切成可检索的 chunk；使用重叠窗口避免长句被截断导致语义丢失
 _splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=200)
+# 文档服务：完成“保存上传文件 -> 解析为纯文本 -> 分块 -> 打标 -> 写入向量库”的上游流程
 _docs = DocumentService(str(Path("data/docs")), _splitter)
+# 向量库：Milvus collection/schema/index/function 初始化 + 插入 + hybrid 检索
 _vec = MilvusVectorStore()
+# LLM 客户端：embedding、rerank、chat（含 json_schema 结构化输出）
 _llm = LLMClient()
+# RAG 服务：hybrid 召回 + rerank 精排 + 生成式回答
 _rag = RAGService(_vec, _llm)
+# 计划服务：PlanWorkflow（拆目标->检索->大纲->日程）+ 落库
 _plans = PlanService(_vec, _llm)
+# 复习服务：艾宾浩斯间隔排期 + 今日待复习查询 + 完成记录
 _reviews = ReviewService()
+# 测验服务：召回->重排->出题 + 提交批改 + 低分薄弱点
 _quizzes = QuizService(_vec, _llm, _reviews)
+# 计划/测验对话代理：负责自然语言槽位解析与多轮对话状态
 _plan_chat = PlanChatAgent(_plans, _llm)
 _quiz_chat = QuizChatAgent(_quizzes, _llm)
+# 主对话代理：统一路由 RAG/计划/测验/复习意图
 _main_chat = MainChatAgent(
     _llm,
     _rag,
@@ -62,6 +75,7 @@ _main_chat = MainChatAgent(
 
 
 def get_db() -> Generator[Session, None, None]:
+    # 统一的 DB Session 依赖：每个请求获得一个会话，结束自动 commit/rollback
     with get_session() as s:
         yield s
 
@@ -74,6 +88,14 @@ async def upload_document(
     tags: Optional[str] = Form(default=None),
     db: Session = Depends(get_db),
 ):
+    """上传/导入资料入口。
+
+    支持两种接入：
+    1) file: 上传 pdf/word/txt 等文件；
+    2) url: 既可以是 http(s) 网页链接，也可以直接是一段纯文本笔记。
+
+    流程：创建 Document -> 解析为纯文本 -> 分块 -> 自动打标 -> 写向量库。
+    """
     user_id = 1
     if not file and not url:
         return JSONResponse({"error": "file or url required"}, status_code=400)
@@ -83,7 +105,9 @@ async def upload_document(
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
 
     # 情况一：用户通过 multipart/form-data 真正上传了文件。
-    # 支持 pdf / word / txt / 其他纯文本文件，解析逻辑在 DocumentService 内部完成。
+    # - 保存到 data/docs/<user_id>/ 目录
+    # - 建立 documents 元数据
+    # - 解析为纯文本（pdf/word 走专用解析器，其余按文本读取）
     if file is not None:
         data = await file.read()
         filename = file.filename or "upload.bin"
@@ -99,10 +123,9 @@ async def upload_document(
         text = _docs.parse_file_to_text(path)
 
     # 情况二：没有上传文件，而是传入 url 字段。
-    # 这里 url 既可能是真实的 URL，也可能是一段“看起来像 URL 的文本”；
-    # 约定：
-    #   - 如果以 http/https 开头，则作为网页链接抓取正文；
-    #   - 否则视为一段普通文本，直接入库。
+    # 约定：字段名叫 url，但实际承载两种语义：
+    # - http(s) 开头：抓取网页正文
+    # - 否则：把它当作用户输入的纯文本笔记
     else:
         doc = _docs.create_document(
             db,
@@ -117,8 +140,11 @@ async def upload_document(
         else:
             text = url or ""
 
+    # 分块：把原始文本切成 chunk（后续写入向量库的最小单位）
     parsed = _docs.parse_and_chunk(doc, text)
+    # 打标：合并手动标签 + AI 标签，并写入 document_tags
     _docs.auto_tag_document(db, _llm, parsed, manual_tags=tag_list or [])
+    # 写向量库：为每个 chunk 生成 embedding，并插入 Milvus（同时自动生成 BM25 稀疏表示）
     _docs.index_to_milvus(_vec, _llm, parsed)
     doc.status = "parsed"
     db.add(doc)

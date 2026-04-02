@@ -21,6 +21,8 @@ from src.vector_store import MilvusVectorStore
 
 
 def main() -> None:
+    # 命令行多轮对话：验证 PlanChatAgent 的“槽位追问 + 生成/调整”体验。
+    # 与 test_phase2.py 的差异：这里不走 HTTP，而是直接在进程内调用 agent.handle_message。
     vec = MilvusVectorStore()
     llm = LLMClient()
     plan_service = PlanService(vec, llm)
@@ -38,6 +40,8 @@ def main() -> None:
             return
 
         with SessionLocal() as session:
+            # 注意：PlanChatAgent 会把多轮槽位状态保存在内存里（self._slots），
+            # 所以不同轮次共享同一个 agent 实例即可。
             reply = agent.handle_message(user, session)
             session.commit()
         print(f"Agent> {reply}")

@@ -1,10 +1,28 @@
+"""LLM 客户端封装：统一 embedding / rerank / chat / 结构化输出。
+
+需求
+- 提供一个轻量、可复用的 LLM 访问层，供 RAG/计划/测验/意图识别等模块调用。
+- 兼容 DashScope 的 OpenAI-compatible 接口（base_url + API Key 环境变量）。
+- 降低成本与延迟：对 embedding 做本地缓存，并对远程请求做必要的重试/限流。
+
+业务逻辑
+- embedding：输入一批文本，优先走本地 sha256 缓存；未命中部分再按批次请求远程 embedding。
+- rerank：对召回候选片段做相关性重排，给上层返回更靠前的片段（用于 RAG/出题）。
+- chat：对话生成/结构化输出（上层可传入 JSON Schema 约束，减少格式漂移）。
+
+主要实现方式
+- 使用官方 OpenAI Python SDK（通过 base_url 指向 DashScope compatible-mode）。
+- embedding_cache.json：落盘在项目根目录，用“文本 hash -> 向量”做缓存。
+- 关键配置来源于 `src/config.py` 的 settings，并通过环境变量注入密钥。
+"""
+
 import hashlib
 import json
 import os
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
 
 import requests
 from openai import OpenAI
@@ -17,6 +35,7 @@ EMBEDDING_BATCH_SIZE = 10
 
 class LLMClient:
     def __init__(self) -> None:
+        # LLM/API Key 读取：使用环境变量，避免把密钥写进代码或仓库
         api_key = os.getenv(settings.llm.api_key_env)
         if not api_key:
             raise RuntimeError(f"env {settings.llm.api_key_env} not set")
@@ -24,7 +43,10 @@ class LLMClient:
 
         self._logger = logging.getLogger(__name__)
 
-        # 在项目根目录下放一个 embedding 缓存文件，按文本内容的 sha256 做 key
+        # embedding 缓存：
+        # - 以文本内容 sha256 做 key
+        # - 落盘到项目根目录 embedding_cache.json
+        # 目的：降低重复入库/重复检索的 embedding 成本与时延
         root = Path(__file__).resolve().parents[2]
         self._cache_path = root / "embedding_cache.json"
         self._embedding_cache: Dict[str, List[float]] = self._load_embedding_cache()
@@ -59,7 +81,7 @@ class LLMClient:
         if not texts:
             return []
 
-        # 先根据 hash 在缓存中命中已有向量
+        # 先根据 hash 在缓存中命中已有向量：命中则跳过远程 embedding 请求
         hashes = [self._text_hash(t) for t in texts]
         vectors: List[List[float] | None] = [None] * len(texts)
         to_call_inputs: List[str] = []
@@ -81,6 +103,7 @@ class LLMClient:
                 "[EMBED] all from cache, "
                 f"cached_total={cached_total}, total_inputs={len(texts)}"
             )
+
         # 对需要远程调用的文本按批次处理，防止超过服务限制
         for i in range(0, len(to_call_inputs), EMBEDDING_BATCH_SIZE):
             batch_inputs = to_call_inputs[i : i + EMBEDDING_BATCH_SIZE]
@@ -104,7 +127,7 @@ class LLMClient:
                 vectors[global_idx] = vec
                 self._embedding_cache[hashes[global_idx]] = vec
 
-        # 同步一次缓存到磁盘
+        # 同步一次缓存到磁盘（失败不影响主流程）
         self._save_embedding_cache()
 
         # 类型断言：此时 vectors 中应该没有 None
@@ -116,6 +139,8 @@ class LLMClient:
         docs: List[str],
         top_n: int = 10,
     ) -> List[dict]:
+        # rerank：把候选文本片段按 query 相关性重新排序。
+        # 使用 DashScope 的 compatible rerank endpoint。
         if not docs:
             return []
         api_key = os.getenv(settings.llm.api_key_env)
@@ -139,6 +164,7 @@ class LLMClient:
         return r.json().get("results", [])
 
     def chat(self, prompt: str) -> str:
+        # 通用对话：用于 RAG 生成回答、计划/测验等自然语言输出
         t0 = time.perf_counter()
         prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
         self._logger.info(
@@ -168,6 +194,7 @@ class LLMClient:
 
     def chat_0_6B(self, prompt: str) -> str:
         """使用小模型 qwen3-0.6b 进行快速意图识别。"""
+        # 小模型的目标：降低成本与延迟，用于 intent/slot 等轻量任务
         t0 = time.perf_counter()
         prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
         self._logger.info(
@@ -207,6 +234,12 @@ class LLMClient:
         Returns:
             符合 json_schema 的 JSON 字符串
         """
+        # 结构化输出：用于
+        # - 自动打标 tags
+        # - 学习大纲 syllabus
+        # - 测验出题 question
+        # - 主观题批改 grading
+        # 通过 schema 约束降低“输出不可解析”的风险
         # 部分服务商要求 prompt 中显式包含 “json” 以启用 json_schema/response_format
         if "json" not in prompt.lower():
             prompt = "请严格按 JSON 输出。" + prompt
@@ -251,6 +284,7 @@ class LLMClient:
         json_schema: dict,
     ) -> str:
         """使用小模型 qwen3-0.6b 进行结构化输出（JSON Schema 模式）。"""
+        # 同 chat_with_json_schema，但使用小模型做低成本结构化输出
         # 部分服务商要求 prompt 中显式包含 "json" 以启用 json_schema/response_format
         if "json" not in prompt.lower():
             prompt = "请严格按 JSON 输出。" + prompt

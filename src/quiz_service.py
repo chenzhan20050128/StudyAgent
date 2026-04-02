@@ -5,6 +5,26 @@
 - 出题采用 Hybrid RAG：top50 检索 -> rerank top5。
 - 送入 LLM 出题时使用 top5 的完整 chunk 内容（不截断）。
 - generate 接口不暴露标准答案；标准答案存入 MySQL，submit 时读取评分。
+
+需求
+- 根据用户描述（题型/范围）从知识库中生成测验题。
+- 支持提交作答并批改，产出得分、反馈，并落库 Attempt。
+- 在低分或关键错误时沉淀 WeakPoint，并联动生成后续复习排期。
+
+业务逻辑
+- 召回：用 description 向量化后执行 hybrid_search(top50) 作为候选集。
+- 重排：对候选做 rerank 选出 top5 作为出题依据（召回广、重排准）。
+- 出题：把 top5 chunk 原文作为上下文，让 LLM 生成结构化题目 JSON。
+- 安全性：generate 不回传标准答案；正确答案仅落库，submit 时再读取评分。
+- 批改：
+    - 客观题按答案匹配；
+    - 主观题/解释题调用 LLM 评分并生成反馈（注意提供兜底解析）。
+- 画像：根据批改结果写入 WeakPoint，并调用 `ReviewService` 生成复习计划。
+
+主要实现方式
+- Workflow：可选 langgraph 编排；不可用时按顺序执行节点。
+- LLM：通过 `LLMClient` 的 embed/rerank/chat 完成召回与生成/批改。
+- 存储：SQLAlchemy 落库 `Quiz` / `QuizAttempt` / `WeakPoint`。
 """
 
 from __future__ import annotations
@@ -55,8 +75,11 @@ class QuizInput:
 
 class QuizWorkflow:
     def __init__(self, vec: MilvusVectorStore, llm: LLMClient) -> None:
+        # vec: 向量库（混合检索召回知识片段）
+        # llm: embedding/rerank/chat（出题与主观题批改）
         self._vec = vec
         self._llm = llm
+        # 可选：langgraph 可用时编排为图；否则顺序执行
         self._graph = self._build_graph()
 
     def _build_graph(self):
@@ -73,6 +96,9 @@ class QuizWorkflow:
         return g.compile()
 
     def _retrieve_candidates(self, state: QuizState) -> QuizState:
+        # 节点 1：召回候选片段
+        # - 先用 description 做 embedding
+        # - 再做 hybrid_search(top50) 作为候选集（召回要“广”）
         description = state.get("description", "")
         user_id = state.get("user_id")
         if user_id is None:
@@ -90,6 +116,9 @@ class QuizWorkflow:
         return state
 
     def _pick_top5(self, state: QuizState) -> QuizState:
+        # 节点 2：rerank 精排，挑 top5 作为出题依据
+        # - hybrid_search 负责召回
+        # - rerank 负责排序稳定性与相关性提升
         description = state.get("description", "")
         candidates = state.get("candidates", [])
         docs = [str(h.get("content") or "") for h in candidates]
@@ -125,6 +154,7 @@ class QuizWorkflow:
                 )
 
         state["picked_chunks"] = picked
+        # source_chunks 是“题目溯源信息”：后续用于生成薄弱点、复习、以及解释题目来源
         state["source_chunks"] = {
             "items": [
                 {
@@ -138,6 +168,8 @@ class QuizWorkflow:
         return state
 
     def _compose_question(self, state: QuizState) -> QuizState:
+        # 节点 3：基于 top5 片段出题
+        # 约束：必须基于给定片段，不可编造片段外事实；输出必须符合 JSON schema
         question_type = str(state.get("question_type") or "single_choice")
         description = str(state.get("description") or "")
         picked = state.get("picked_chunks", [])
@@ -188,6 +220,7 @@ class QuizWorkflow:
         )
 
         raw = self._llm.chat_with_json_schema(prompt, schema)
+        # 容错解析：防止模型输出不规范导致流程中断
         question = self._safe_parse_question(raw, question_type)
         state["question_json"] = question
         return state
@@ -270,6 +303,8 @@ class QuizService:
         question_type: str,
         doc_ids: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
+        # 对外生成题目接口：执行工作流 -> 落库 quizzes
+        # 注意：数据库中会保存标准答案，但返回给调用方时会过滤 answer，避免前端直接看到答案
         state = self._workflow.run(
             QuizInput(
                 user_id=user_id,
@@ -328,6 +363,11 @@ class QuizService:
         quiz_id: int,
         answer: Any,
     ) -> Dict[str, Any]:
+        # 提交答案接口：
+        # 1) 读取题目与标准答案（答案存于 question_json 中）
+        # 2) 客观题走规则比对；主观题走 LLM 批改
+        # 3) 落库 quiz_attempts
+        # 4) 低分触发 weak_points，并自动创建复习排期
         quiz = db.get(Quiz, quiz_id)
         if quiz is None or quiz.user_id != user_id:
             raise ValueError("quiz not found")
@@ -355,6 +395,7 @@ class QuizService:
 
         weak_point_id: Optional[int] = None
         if score < 4:
+            # 低分判定为“薄弱点”：把错因与来源片段绑定，便于后续针对性复习
             source_items = (quiz.source_chunks or {}).get("items") or []
             related_doc_id = source_items[0].get("doc_id") if source_items else None
             related_chunk_ids = [
@@ -407,6 +448,9 @@ class QuizService:
         std_answer: str,
         user_answer: Any,
     ) -> tuple[float, str, str]:
+        # 评分策略：
+        # - 单选/多选/填空：规则判卷（确定性）
+        # - 简答等主观题：LLM 判卷（返回 score/comment，可选 weak_point）
         if question_type == "single_choice":
             user = str(user_answer).strip().upper()
             std = std_answer.strip().upper()
@@ -463,6 +507,7 @@ class QuizService:
         std_answer: str,
         user_answer: Any,
     ) -> tuple[float, str, str]:
+        # 用结构化输出约束批改结果，避免模型自由发挥导致解析失败
         schema = {
             "name": "quiz_grading",
             "schema": {
